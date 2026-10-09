@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any
 
 
+CODEX_DERIVED_VERSION = 6
+
+
 class InvalidCodexLog(ValueError):
     pass
 
@@ -261,6 +264,15 @@ def _preview(value: Any, limit: int = 6000) -> str | None:
     return text if len(text) <= limit else f"{text[:limit]}\n…（已截断）"
 
 
+def _summary_fields(value: Any) -> tuple[str | None, str | None]:
+    if not isinstance(value, str) or not value.strip():
+        return None, None
+    cleaned = value.strip()
+    if cleaned.casefold() in {"none", "auto", "brief", "concise", "detailed"}:
+        return None, cleaned
+    return _preview(cleaned, limit=12_000), None
+
+
 def _tool_call(payload: dict[str, Any], timestamp: str | None) -> dict[str, Any] | None:
     payload_type = payload.get("type")
     if payload_type not in {"function_call", "custom_tool_call", "local_shell_call"}:
@@ -374,6 +386,7 @@ def turns_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 )
                 collaboration = payload.get("collaboration_mode")
                 roots = payload.get("workspace_roots")
+                summary, summary_mode = _summary_fields(payload.get("summary"))
                 current["context"] = {
                     "cwd": payload.get("cwd") if isinstance(payload.get("cwd"), str) else None,
                     "workspace_roots": (
@@ -394,7 +407,8 @@ def turns_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         else collaboration
                     ),
                     "realtime_active": payload.get("realtime_active"),
-                    "summary": _preview(payload.get("summary"), limit=12_000),
+                    "summary": summary,
+                    "summary_mode": summary_mode,
                 }
             continue
         message = _message(record)
@@ -516,19 +530,26 @@ def tool_calls_from_transcript(transcript: str, limit: int = 500) -> list[dict[s
 
 def context_from_transcript(transcript: str) -> dict[str, Any] | None:
     latest: dict[str, Any] | None = None
+    meta: dict[str, Any] | None = None
     for line in transcript.splitlines():
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
         payload = record.get("payload") if isinstance(record, dict) else None
+        if record.get("type") == "session_meta" and isinstance(payload, dict) and meta is None:
+            meta = payload
         if record.get("type") == "turn_context" and isinstance(payload, dict):
             latest = payload
-    if latest is None:
+    if latest is None and meta is None:
         return None
+    latest = latest or {}
     sandbox = latest.get("sandbox_policy")
     sandbox_name = sandbox.get("type") if isinstance(sandbox, dict) else sandbox
     roots = latest.get("workspace_roots")
+    summary, summary_mode = _summary_fields(latest.get("summary"))
+    base = meta.get("base_instructions") if isinstance(meta, dict) else None
+    base_text = base.get("text") if isinstance(base, dict) else base
     return {
         "model": latest.get("model") if isinstance(latest.get("model"), str) else None,
         "effort": latest.get("effort") if isinstance(latest.get("effort"), str) else None,
@@ -538,5 +559,7 @@ def context_from_transcript(transcript: str) -> dict[str, Any] | None:
         else None,
         "sandbox": sandbox_name if isinstance(sandbox_name, str) else None,
         "workspace_roots": [str(item) for item in roots] if isinstance(roots, list) else [],
-        "summary": _preview(latest.get("summary"), limit=12_000),
+        "summary": summary,
+        "summary_mode": summary_mode,
+        "base_instructions": _preview(base_text, limit=30_000),
     }

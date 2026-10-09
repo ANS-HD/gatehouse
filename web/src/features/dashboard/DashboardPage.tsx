@@ -199,18 +199,38 @@ export function DashboardPage() {
   };
 
   const uploadCodexLogs = async (files: File[]) => {
-    if (!files.length) return;
+    const jsonlFiles = files.filter((file) => file.name.toLowerCase().endsWith(".jsonl"));
+    if (!jsonlFiles.length) {
+      message.warning("所选内容中没有 JSONL 会话文件");
+      return;
+    }
     try {
       setCodexLoading(true);
       const results = [];
-      for (const file of files) results.push(await dashboardApi.importCodexSession(file));
+      for (const [index, file] of jsonlFiles.entries()) {
+        message.open({
+          key: "codex-folder-upload",
+          type: "loading",
+          content: `正在同步 ${index + 1} / ${jsonlFiles.length}：${file.name}`,
+          duration: 0,
+        });
+        results.push(await dashboardApi.importCodexSession(file));
+      }
       const nextSessions = await dashboardApi.codexSessions();
       setCodexSessions(nextSessions);
       setAllCodexSessions(nextSessions);
       const changed = results.filter((item) => item.status !== "unchanged").length;
-      message.success(`已处理 ${results.length} 个文件，新增或更新 ${changed} 个会话`);
+      message.open({
+        key: "codex-folder-upload",
+        type: "success",
+        content: `已处理 ${results.length} 个文件，新增或更新 ${changed} 个会话`,
+      });
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "Codex 日志上传失败");
+      message.open({
+        key: "codex-folder-upload",
+        type: "error",
+        content: error instanceof Error ? error.message : "Codex 日志上传失败",
+      });
     } finally {
       setCodexLoading(false);
     }

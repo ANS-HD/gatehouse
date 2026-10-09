@@ -149,6 +149,10 @@ class ApiTests(unittest.TestCase):
                     "timestamp": "2026-09-28T01:00:00Z",
                     "cwd": "/private/project",
                     "source": "cli",
+                    "base_instructions": {
+                        "text": "Base system instructions",
+                        "provenance": {"source": "test"},
+                    },
                 },
             },
             {
@@ -181,7 +185,7 @@ class ApiTests(unittest.TestCase):
                     "workspace_roots": ["/private/project"],
                     "approval_policy": "on-request",
                     "sandbox_policy": {"type": "workspace-write"},
-                    "summary": "Earlier decisions",
+                    "summary": "detailed",
                 },
             },
             {
@@ -277,6 +281,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(duplicate.json()["status"], "unchanged")
         sessions = self.client.get("/api/codex/sessions", headers=self.authorization(token)).json()
         self.assertTrue(any(item["session_id"] == "session-test-1" for item in sessions))
+        with app.state.db.connect() as connection:
+            connection.execute(
+                "UPDATE codex_sessions SET derived_version = 5 WHERE session_id = ?",
+                ("session-test-1",),
+            )
         detail = self.client.get(
             "/api/codex/sessions/session-test-1", headers=self.authorization(token)
         )
@@ -292,7 +301,9 @@ class ApiTests(unittest.TestCase):
             [event["role"] for event in turn["events"] if event["kind"] == "message"],
             ["developer", "user", "assistant"],
         )
-        self.assertEqual(turn["context"]["summary"], "Earlier decisions")
+        self.assertIsNone(turn["context"]["summary"])
+        self.assertEqual(turn["context"]["summary_mode"], "detailed")
+        self.assertEqual(detail.json()["context"]["base_instructions"], "Base system instructions")
         self.assertEqual(turn["context"]["sandbox"], "workspace-write")
         self.assertEqual(turn["events"][-1]["output"], "Done!")
         search = self.client.get(

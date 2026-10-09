@@ -22,6 +22,7 @@ from app.schemas.codex_logs import (
     CodexUploadTokenView,
 )
 from app.services.codex_logs import (
+    CODEX_DERIVED_VERSION,
     InvalidCodexLog,
     context_from_transcript,
     messages_from_transcript,
@@ -133,7 +134,7 @@ async def import_session(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     secret = settings.session_secret.get_secret_value()
     data = parsed.__dict__.copy()
-    data["derived_version"] = 5
+    data["derived_version"] = CODEX_DERIVED_VERSION
     transcript = data.pop("transcript")
     turns = data.pop("turns")
     cwd = data.pop("cwd")
@@ -173,25 +174,31 @@ def session_detail(
         raise HTTPException(status_code=500, detail="Unable to decrypt Codex session")
     row.pop("owner_id", None)
     row.pop("content_hash", None)
-    turns = db.get_codex_turns(user["id"], session_id)
-    for turn in turns:
-        context = _decrypt(turn.pop("context_encrypted", None), secret)
-        try:
-            turn["context"] = json.loads(context) if context else None
-        except json.JSONDecodeError:
-            turn["context"] = None
-        decoded_events = []
-        for event in turn.pop("events"):
-            content = _decrypt(event.pop("content_encrypted"), secret)
-            if content is None:
-                continue
+    if int(row.get("derived_version") or 0) < CODEX_DERIVED_VERSION:
+        # Keep previously imported transcripts useful after parser upgrades.
+        # The encrypted raw transcript is the source of truth; only the
+        # derived turn index needs rebuilding.
+        turns = parse_codex_log(transcript.encode("utf-8"), f"{session_id}.jsonl").turns
+    else:
+        turns = db.get_codex_turns(user["id"], session_id)
+        for turn in turns:
+            context = _decrypt(turn.pop("context_encrypted", None), secret)
             try:
-                decoded = json.loads(content)
+                turn["context"] = json.loads(context) if context else None
             except json.JSONDecodeError:
-                continue
-            if isinstance(decoded, dict):
-                decoded_events.append(decoded)
-        turn["events"] = decoded_events
+                turn["context"] = None
+            decoded_events = []
+            for event in turn.pop("events"):
+                content = _decrypt(event.pop("content_encrypted"), secret)
+                if content is None:
+                    continue
+                try:
+                    decoded = json.loads(content)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(decoded, dict):
+                    decoded_events.append(decoded)
+            turn["events"] = decoded_events
     return {
         **_view(row, secret),
         "messages": messages_from_transcript(transcript),

@@ -1,4 +1,4 @@
-import { DeleteOutlined, EditOutlined, EyeOutlined, RestOutlined, UploadOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, EyeOutlined, FolderOpenOutlined, RestOutlined, UploadOutlined } from "@ant-design/icons";
 import { Button, Card, Descriptions, Empty, Flex, Input, Modal, Popconfirm, Progress, Select, Space, Statistic, Switch, Tabs, Tag, Typography } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { compactNumber, formatDate, integer } from "../../../lib/format";
@@ -142,7 +142,8 @@ export function CodexLogsPanel({
   onClose: () => void;
   onSearch: (query: string, project?: string, deleted?: boolean) => void;
 }) {
-  const input = useRef<HTMLInputElement>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const folderInput = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [project, setProject] = useState<string>();
   const [showDeleted, setShowDeleted] = useState(false);
@@ -164,14 +165,30 @@ export function CodexLogsPanel({
     () => detail?.turns.find((turn) => turn.turn_id === selectedTurnId) || detail?.turns.at(-1),
     [detail, selectedTurnId],
   );
+  const selectedTurnIndex = useMemo(
+    () => detail && selectedTurn ? detail.turns.findIndex((turn) => turn.turn_id === selectedTurn.turn_id) : -1,
+    [detail, selectedTurn],
+  );
+  const priorTurns = useMemo(
+    () => detail && selectedTurnIndex > 0 ? detail.turns.slice(0, selectedTurnIndex) : [],
+    [detail, selectedTurnIndex],
+  );
   const selectedRequests = useMemo(
     () => selectedTurn?.events.filter((event) => event.kind === "message" && event.role === "user") || [],
     [selectedTurn],
   );
-  const selectedProcessEvents = useMemo(
-    () => selectedTurn?.events.filter((event) => !(event.kind === "message" && event.role === "user")) || [],
+  const selectedContextMessages = useMemo(
+    () => selectedTurn?.events.filter((event) => event.kind === "message" && (event.role === "system" || event.role === "developer")) || [],
     [selectedTurn],
   );
+  const selectedProcessEvents = useMemo(
+    () => selectedTurn?.events.filter((event) => !(event.kind === "message" && ["user", "system", "developer"].includes(event.role || ""))) || [],
+    [selectedTurn],
+  );
+  const priorContextTotals = useMemo(() => ({
+    messages: priorTurns.reduce((sum, turn) => sum + turn.events.filter((event) => event.kind === "message").length, 0),
+    tools: priorTurns.reduce((sum, turn) => sum + turn.events.filter((event) => event.kind === "tool").length, 0),
+  }), [priorTurns]);
   const timeline = useMemo(() => {
     if (!detail) return [];
     return [
@@ -188,7 +205,7 @@ export function CodexLogsPanel({
         extra={(
           <>
             <input
-              ref={input}
+              ref={fileInput}
               hidden
               multiple
               type="file"
@@ -198,9 +215,29 @@ export function CodexLogsPanel({
                 event.target.value = "";
               }}
             />
-            <Button icon={<UploadOutlined />} loading={loading} onClick={() => input.current?.click()}>
-              上传 JSONL
-            </Button>
+            <input
+              ref={(element) => {
+                folderInput.current = element;
+                element?.setAttribute("webkitdirectory", "");
+                element?.setAttribute("directory", "");
+              }}
+              hidden
+              multiple
+              type="file"
+              accept=".jsonl,application/x-ndjson"
+              onChange={(event) => {
+                onUpload(Array.from(event.target.files || []));
+                event.target.value = "";
+              }}
+            />
+            <Space>
+              <Button icon={<UploadOutlined />} disabled={loading} onClick={() => fileInput.current?.click()}>
+                上传 JSONL
+              </Button>
+              <Button icon={<FolderOpenOutlined />} loading={loading} onClick={() => folderInput.current?.click()}>
+                同步 sessions 文件夹
+              </Button>
+            </Space>
           </>
         )}
       >
@@ -380,7 +417,56 @@ export function CodexLogsPanel({
                                 { key: "mode", label: "协作模式", children: selectedTurn.context.collaboration_mode || "—" },
                                 { key: "personality", label: "人格", children: selectedTurn.context.personality || "—" },
                                 { key: "realtime", label: "实时语音", children: selectedTurn.context.realtime_active == null ? "—" : selectedTurn.context.realtime_active ? "开启" : "关闭" },
+                                { key: "summary-mode", label: "摘要策略", children: selectedTurn.context.summary_mode || "—" },
                               ]} />
+                              <div className="codex-context-content">
+                                <Text strong>本轮模型输入内容</Text>
+                                <Text type="secondary">以下内容由原始日志重建；发生上下文压缩时，早期内容可能由模型内部压缩窗口替代。</Text>
+                                {detail.context?.base_instructions ? (
+                                  <details className="codex-context-section">
+                                    <summary>
+                                      <span>基础系统指令</span>
+                                      <Text type="secondary">{detail.context.base_instructions.length.toLocaleString()} 字符</Text>
+                                    </summary>
+                                    <pre>{detail.context.base_instructions}</pre>
+                                  </details>
+                                ) : <Text type="secondary">日志未记录基础系统指令</Text>}
+                                <details className="codex-context-section" open={selectedContextMessages.length > 0}>
+                                  <summary>
+                                    <span>本轮系统 / 开发者注入</span>
+                                    <Text type="secondary">{selectedContextMessages.length} 条</Text>
+                                  </summary>
+                                  <div className="codex-context-event-list">
+                                    {selectedContextMessages.length ? selectedContextMessages.map((event, index) => (
+                                      <MessageCard message={event} key={`context-message-${index}`} />
+                                    )) : <Text type="secondary">本轮没有单独注入系统或开发者消息</Text>}
+                                  </div>
+                                </details>
+                                <details className="codex-context-section">
+                                  <summary>
+                                    <span>前序轮次上下文</span>
+                                    <Text type="secondary">{priorTurns.length} 轮 · {priorContextTotals.messages} 消息 · {priorContextTotals.tools} 工具</Text>
+                                  </summary>
+                                  <div className="codex-context-history">
+                                    {priorTurns.length ? priorTurns.map((turn) => {
+                                      const request = turn.events.find((event) => event.kind === "message" && event.role === "user");
+                                      return (
+                                        <details key={`context-turn-${turn.turn_id}`}>
+                                          <summary>
+                                            <span>轮次 {turn.sequence} · {request?.text || "未记录用户请求"}</span>
+                                            <Text type="secondary">{turn.message_count} 消息 · {turn.tool_call_count} 工具</Text>
+                                          </summary>
+                                          <div className="codex-context-event-list">
+                                            {turn.events.map((event, index) => event.kind === "message" ? (
+                                              <MessageCard message={event} key={`context-turn-${turn.turn_id}-message-${index}`} />
+                                            ) : <ToolCard tool={event} key={`context-turn-${turn.turn_id}-tool-${event.call_id || index}`} />)}
+                                          </div>
+                                        </details>
+                                      );
+                                    }) : <Text type="secondary">这是首轮，没有前序对话</Text>}
+                                  </div>
+                                </details>
+                              </div>
                               {selectedTurn.context.summary ? (
                                 <details className="codex-context-summary">
                                   <summary>本轮压缩上下文摘要</summary>

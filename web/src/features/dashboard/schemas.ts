@@ -121,6 +121,8 @@ export const codexSessionDetailSchema = codexSessionSchema.extend({
     sandbox: z.string().nullable(),
     workspace_roots: z.array(z.string()),
     summary: z.string().nullable(),
+    summary_mode: z.string().nullable().optional(),
+    base_instructions: z.string().nullable().optional(),
   }).nullable(),
   turns: z.array(z.object({
     turn_id: z.string(),
@@ -151,6 +153,7 @@ export const codexSessionDetailSchema = codexSessionSchema.extend({
       collaboration_mode: z.string().nullable(),
       realtime_active: z.boolean().nullable(),
       summary: z.string().nullable(),
+      summary_mode: z.string().nullable().optional(),
     }).nullable(),
     events: z.array(z.object({
       kind: z.string(),

@@ -56,6 +56,8 @@ class CodexContextView(BaseModel):
     sandbox: str | None
     workspace_roots: list[str]
     summary: str | None
+    summary_mode: str | None = None
+    base_instructions: str | None = None
 
 
 class CodexTurnEventView(BaseModel):
@@ -83,6 +85,7 @@ class CodexTurnContextView(BaseModel):
     collaboration_mode: str | None = None
     realtime_active: bool | None = None
     summary: str | None = None
+    summary_mode: str | None = None
 
 
 class CodexTurnView(BaseModel):
