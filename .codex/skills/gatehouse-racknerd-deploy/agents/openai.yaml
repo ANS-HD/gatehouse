@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gatehouse RackNerd Deploy"
+  short_description: "Deploy and troubleshoot Gatehouse on RackNerd VPS"
+  default_prompt: "Use $gatehouse-racknerd-deploy to deploy Gatehouse safely on my RackNerd VPS."

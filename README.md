@@ -77,6 +77,43 @@ DETAILED_LOG_MAX_BYTES=65536
 
 认证头、Cookie、密码、Token 和 API Key 会在写入前替换为 `[REDACTED]`。JSON 或文本正文最多保存配置的字节数，二进制正文只记录类型和大小。服务每 6 小时清理一次超过保留期限的正文与请求头，统计元数据仍会保留。
 
+## 导入本地 Codex 会话
+
+使用 ChatGPT Plus 登录的 Codex 不会经过 Gatehouse 代理，但可以把保存在
+`~/.codex/sessions` 下的本地 JSONL 会话导入 Gatehouse。在后台的“本地 Codex 会话”区域可手动选择
+一个或多个 JSONL 文件，也可以运行增量上传脚本：
+
+```bash
+python3 deploy/upload_codex_logs.py \
+  --url https://你的域名 \
+  --email 你的登录邮箱 \
+  --since-days 90
+```
+
+脚本会交互式读取 Gatehouse 密码，不会保存密码或会话令牌；本地状态文件仅保存已上传文件的路径和
+SHA-256，用于跳过未变化的文件。服务端按账户和 Codex 会话 ID 去重，增长中的会话会在下次运行时更新。
+`--since-days` 可限制首次回填范围；单文件 Hook 上传不受该参数影响。
+
+自动上传使用一个仅能调用日志导入接口的专用令牌。先生成并保存令牌：
+
+```bash
+python3 deploy/upload_codex_logs.py \
+  --url https://你的域名 \
+  --email 你的登录邮箱 \
+  --configure
+```
+
+然后按照 [Codex Hooks 文档](https://learn.chatgpt.com/docs/hooks) 在用户级
+`~/.codex/hooks.json` 中配置 `SessionEnd`，调用 `deploy/codex_session_end_hook.py`。Hook 会在会话结束、
+归档或闲置结束后启动独立上传进程。专用令牌默认保存在 `~/.codex/gatehouse-upload-token`，权限为
+仅当前用户可读；重新运行 `--configure` 会轮换旧令牌。
+
+完整转录、工作目录和会话标题使用 `SESSION_SECRET` 派生的密钥加密保存。界面只展示用户与助手消息，
+但原始转录可能包含提示词、文件内容和工具输出，上传前请确认服务器和账号可信。单文件大小默认限制为
+32 MiB，可通过 `CODEX_LOG_MAX_BYTES` 调整。会话分析区支持标题、项目、模型和消息正文搜索，并汇总消息、
+工具调用和 Token 用量。会话默认保留 90 天，可通过 `CODEX_LOG_RETENTION_DAYS` 调整；服务启动时及之后
+每 6 小时清理一次过期会话。
+
 ## 备份与恢复
 
 备份脚本使用 SQLite 在线备份接口生成一致性快照，并同时保存部署配置：

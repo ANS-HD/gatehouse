@@ -16,6 +16,10 @@ def new_gateway_key() -> str:
     return f"gw_{secrets.token_urlsafe(32)}"
 
 
+def new_codex_upload_token() -> str:
+    return f"clu_{secrets.token_urlsafe(32)}"
+
+
 def encrypt_secret(value: str, secret: str) -> str:
     key = hashlib.sha256(secret.encode()).digest()
     nonce = secrets.token_bytes(12)

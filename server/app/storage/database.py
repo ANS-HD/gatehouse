@@ -139,6 +139,85 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);
                 CREATE INDEX IF NOT EXISTS idx_requests_key_id ON requests(key_id);
+                CREATE TABLE IF NOT EXISTS codex_sessions (
+                    owner_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    cwd_encrypted TEXT,
+                    title_encrypted TEXT NOT NULL,
+                    custom_title_encrypted TEXT,
+                    transcript_encrypted TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    derived_version INTEGER NOT NULL DEFAULT 1,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    event_count INTEGER NOT NULL,
+                    message_count INTEGER NOT NULL,
+                    user_message_count INTEGER NOT NULL DEFAULT 0,
+                    assistant_message_count INTEGER NOT NULL DEFAULT 0,
+                    tool_call_count INTEGER NOT NULL DEFAULT 0,
+                    turn_count INTEGER NOT NULL DEFAULT 0,
+                    model TEXT,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                    context_tokens INTEGER NOT NULL DEFAULT 0,
+                    context_window INTEGER NOT NULL DEFAULT 0,
+                    byte_count INTEGER NOT NULL,
+                    imported_at TEXT NOT NULL,
+                    deleted_at TEXT,
+                    PRIMARY KEY (owner_id, session_id),
+                    FOREIGN KEY (owner_id) REFERENCES users(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_codex_sessions_owner_started
+                ON codex_sessions(owner_id, started_at DESC);
+                CREATE TABLE IF NOT EXISTS codex_turns (
+                    owner_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    turn_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    started_at TEXT,
+                    ended_at TEXT,
+                    model TEXT,
+                    effort TEXT,
+                    status TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    context_window INTEGER NOT NULL DEFAULT 0,
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    tool_call_count INTEGER NOT NULL DEFAULT 0,
+                    context_encrypted TEXT,
+                    PRIMARY KEY (owner_id, session_id, turn_id),
+                    FOREIGN KEY (owner_id, session_id)
+                        REFERENCES codex_sessions(owner_id, session_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_codex_turns_session
+                ON codex_turns(owner_id, session_id, sequence);
+                CREATE TABLE IF NOT EXISTS codex_events (
+                    owner_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    turn_id TEXT NOT NULL,
+                    event_index INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    timestamp TEXT,
+                    content_encrypted TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, session_id, turn_id, event_index),
+                    FOREIGN KEY (owner_id, session_id, turn_id)
+                        REFERENCES codex_turns(owner_id, session_id, turn_id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS codex_upload_tokens (
+                    owner_id TEXT PRIMARY KEY,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    prefix TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_used_at TEXT,
+                    FOREIGN KEY (owner_id) REFERENCES users(id)
+                );
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(client_keys)")}
@@ -188,6 +267,298 @@ class Database:
             for name, definition in detail_columns.items():
                 if name not in request_columns:
                     connection.execute(f"ALTER TABLE requests ADD COLUMN {name} {definition}")
+            codex_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(codex_sessions)")
+            }
+            codex_column_definitions = {
+                "user_message_count": "INTEGER NOT NULL DEFAULT 0",
+                "assistant_message_count": "INTEGER NOT NULL DEFAULT 0",
+                "tool_call_count": "INTEGER NOT NULL DEFAULT 0",
+                "turn_count": "INTEGER NOT NULL DEFAULT 0",
+                "model": "TEXT",
+                "input_tokens": "INTEGER NOT NULL DEFAULT 0",
+                "cached_input_tokens": "INTEGER NOT NULL DEFAULT 0",
+                "output_tokens": "INTEGER NOT NULL DEFAULT 0",
+                "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0",
+                "context_tokens": "INTEGER NOT NULL DEFAULT 0",
+                "context_window": "INTEGER NOT NULL DEFAULT 0",
+                "custom_title_encrypted": "TEXT",
+                "deleted_at": "TEXT",
+                "derived_version": "INTEGER NOT NULL DEFAULT 1",
+            }
+            for name, definition in codex_column_definitions.items():
+                if name not in codex_columns:
+                    connection.execute(f"ALTER TABLE codex_sessions ADD COLUMN {name} {definition}")
+            turn_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(codex_turns)")
+            }
+            if "context_encrypted" not in turn_columns:
+                connection.execute("ALTER TABLE codex_turns ADD COLUMN context_encrypted TEXT")
+
+    def upsert_codex_session(self, owner_id: str, session: dict[str, Any]) -> str:
+        turns = session.get("turns", [])
+        with self.connect() as connection:
+            existing = connection.execute(
+                """SELECT content_hash, derived_version FROM codex_sessions
+                WHERE owner_id = ? AND session_id = ?""",
+                (owner_id, session["session_id"]),
+            ).fetchone()
+            if (
+                existing
+                and existing["content_hash"] == session["content_hash"]
+                and existing["derived_version"] == session["derived_version"]
+            ):
+                turn_count = connection.execute(
+                    """SELECT COUNT(*) AS count FROM codex_turns
+                    WHERE owner_id = ? AND session_id = ?""",
+                    (owner_id, session["session_id"]),
+                ).fetchone()["count"]
+                if turn_count == len(turns):
+                    return "unchanged"
+            values = (
+                owner_id,
+                session["session_id"],
+                session["source"],
+                session.get("cwd_encrypted"),
+                session["title_encrypted"],
+                session["transcript_encrypted"],
+                session["content_hash"],
+                session["derived_version"],
+                session["started_at"],
+                session["ended_at"],
+                session["event_count"],
+                session["message_count"],
+                session["user_message_count"],
+                session["assistant_message_count"],
+                session["tool_call_count"],
+                session["turn_count"],
+                session["model"],
+                session["total_tokens"],
+                session["input_tokens"],
+                session["cached_input_tokens"],
+                session["output_tokens"],
+                session["reasoning_tokens"],
+                session["context_tokens"],
+                session["context_window"],
+                session["byte_count"],
+                utcnow(),
+            )
+            connection.execute(
+                """INSERT INTO codex_sessions
+                (owner_id, session_id, source, cwd_encrypted, title_encrypted,
+                 transcript_encrypted, content_hash, derived_version, started_at,
+                 ended_at, event_count,
+                 message_count, user_message_count, assistant_message_count,
+                 tool_call_count, turn_count, model, total_tokens, input_tokens,
+                 cached_input_tokens, output_tokens, reasoning_tokens,
+                 context_tokens, context_window,
+                 byte_count, imported_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_id, session_id) DO UPDATE SET
+                    source = excluded.source,
+                    cwd_encrypted = excluded.cwd_encrypted,
+                    title_encrypted = excluded.title_encrypted,
+                    transcript_encrypted = excluded.transcript_encrypted,
+                    content_hash = excluded.content_hash,
+                    derived_version = excluded.derived_version,
+                    started_at = excluded.started_at,
+                    ended_at = excluded.ended_at,
+                    event_count = excluded.event_count,
+                    message_count = excluded.message_count,
+                    user_message_count = excluded.user_message_count,
+                    assistant_message_count = excluded.assistant_message_count,
+                    tool_call_count = excluded.tool_call_count,
+                    turn_count = excluded.turn_count,
+                    model = excluded.model,
+                    total_tokens = excluded.total_tokens,
+                    input_tokens = excluded.input_tokens,
+                    cached_input_tokens = excluded.cached_input_tokens,
+                    output_tokens = excluded.output_tokens,
+                    reasoning_tokens = excluded.reasoning_tokens,
+                    context_tokens = excluded.context_tokens,
+                    context_window = excluded.context_window,
+                    byte_count = excluded.byte_count,
+                    imported_at = excluded.imported_at""",
+                values,
+            )
+            connection.execute(
+                "DELETE FROM codex_turns WHERE owner_id = ? AND session_id = ?",
+                (owner_id, session["session_id"]),
+            )
+            for turn in turns:
+                connection.execute(
+                    """INSERT INTO codex_turns
+                    (owner_id, session_id, turn_id, sequence, started_at, ended_at,
+                     model, effort, status, input_tokens, cached_input_tokens,
+                     output_tokens, reasoning_tokens, total_tokens, context_window,
+                     message_count, tool_call_count, context_encrypted)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        owner_id, session["session_id"], turn["turn_id"], turn["sequence"],
+                        turn.get("started_at"), turn.get("ended_at"), turn.get("model"),
+                        turn.get("effort"), turn["status"], turn["input_tokens"],
+                        turn["cached_input_tokens"], turn["output_tokens"],
+                        turn["reasoning_tokens"], turn["total_tokens"],
+                        turn["context_window"], turn["message_count"], turn["tool_call_count"],
+                        turn.get("context_encrypted"),
+                    ),
+                )
+                for event_index, event in enumerate(turn.get("events", [])):
+                    connection.execute(
+                        """INSERT INTO codex_events
+                        (owner_id, session_id, turn_id, event_index, kind, timestamp,
+                         content_encrypted)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            owner_id, session["session_id"], turn["turn_id"], event_index,
+                            event["kind"], event.get("timestamp"), event["content_encrypted"],
+                        ),
+                    )
+        return "updated" if existing else "created"
+
+    def list_codex_sessions(
+        self, owner_id: str, limit: int = 500, deleted: bool = False
+    ) -> list[dict[str, Any]]:
+        deleted_filter = "deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL"
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""SELECT session_id, source, cwd_encrypted, title_encrypted,
+                custom_title_encrypted,
+                transcript_encrypted, started_at, ended_at, event_count, message_count,
+                user_message_count, assistant_message_count, tool_call_count, turn_count, model,
+                total_tokens, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens,
+                context_tokens, context_window, byte_count, imported_at, deleted_at
+                FROM codex_sessions WHERE owner_id = ? AND {deleted_filter}
+                ORDER BY started_at DESC LIMIT ?""",
+                (owner_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def purge_codex_sessions(self, retention_days: int) -> int:
+        cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
+        with self.connect() as connection:
+            cursor = connection.execute("DELETE FROM codex_sessions WHERE ended_at < ?", (cutoff,))
+        return cursor.rowcount
+
+    def get_codex_session(self, owner_id: str, session_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM codex_sessions WHERE owner_id = ? AND session_id = ?",
+                (owner_id, session_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_codex_turns(self, owner_id: str, session_id: str) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            turn_rows = connection.execute(
+                """SELECT * FROM codex_turns
+                WHERE owner_id = ? AND session_id = ? ORDER BY sequence""",
+                (owner_id, session_id),
+            ).fetchall()
+            event_rows = connection.execute(
+                """SELECT turn_id, event_index, kind, timestamp, content_encrypted
+                FROM codex_events WHERE owner_id = ? AND session_id = ?
+                ORDER BY turn_id, event_index""",
+                (owner_id, session_id),
+            ).fetchall()
+        events: dict[str, list[dict[str, Any]]] = {}
+        for row in event_rows:
+            event = dict(row)
+            events.setdefault(event.pop("turn_id"), []).append(event)
+        result = []
+        for row in turn_rows:
+            turn = dict(row)
+            turn.pop("owner_id", None)
+            turn.pop("session_id", None)
+            turn["events"] = events.get(turn["turn_id"], [])
+            result.append(turn)
+        return result
+
+    def delete_codex_session(
+        self, owner_id: str, session_id: str, permanent: bool = False
+    ) -> bool:
+        with self.connect() as connection:
+            if permanent:
+                cursor = connection.execute(
+                    "DELETE FROM codex_sessions WHERE owner_id = ? AND session_id = ?",
+                    (owner_id, session_id),
+                )
+            else:
+                cursor = connection.execute(
+                    """UPDATE codex_sessions SET deleted_at = ?
+                    WHERE owner_id = ? AND session_id = ? AND deleted_at IS NULL""",
+                    (utcnow(), owner_id, session_id),
+                )
+        return cursor.rowcount > 0
+
+    def restore_codex_session(self, owner_id: str, session_id: str) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE codex_sessions SET deleted_at = NULL
+                WHERE owner_id = ? AND session_id = ? AND deleted_at IS NOT NULL""",
+                (owner_id, session_id),
+            )
+        return cursor.rowcount > 0
+
+    def rename_codex_session(
+        self, owner_id: str, session_id: str, title_encrypted: str | None
+    ) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE codex_sessions SET custom_title_encrypted = ?
+                WHERE owner_id = ? AND session_id = ?""",
+                (title_encrypted, owner_id, session_id),
+            )
+        return cursor.rowcount > 0
+
+    def replace_codex_upload_token(
+        self, owner_id: str, key_hash: str, prefix: str
+    ) -> dict[str, Any]:
+        created_at = utcnow()
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO codex_upload_tokens (owner_id, key_hash, prefix, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(owner_id) DO UPDATE SET
+                    key_hash = excluded.key_hash,
+                    prefix = excluded.prefix,
+                    created_at = excluded.created_at,
+                    last_used_at = NULL""",
+                (owner_id, key_hash, prefix, created_at),
+            )
+        return {"prefix": prefix, "created_at": created_at, "last_used_at": None}
+
+    def get_codex_upload_token(self, owner_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT prefix, created_at, last_used_at FROM codex_upload_tokens
+                WHERE owner_id = ?""",
+                (owner_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def use_codex_upload_token(self, key_hash: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT users.* FROM codex_upload_tokens
+                JOIN users ON users.id = codex_upload_tokens.owner_id
+                WHERE codex_upload_tokens.key_hash = ?""",
+                (key_hash,),
+            ).fetchone()
+            if row:
+                connection.execute(
+                    "UPDATE codex_upload_tokens SET last_used_at = ? WHERE key_hash = ?",
+                    (utcnow(), key_hash),
+                )
+        return serialize_user(dict(row)) if row else None
+
+    def revoke_codex_upload_token(self, owner_id: str) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM codex_upload_tokens WHERE owner_id = ?", (owner_id,)
+            )
+        return cursor.rowcount > 0
 
     def ensure_default_provider(
         self, *, name: str, base_url: str, api_key_encrypted: str

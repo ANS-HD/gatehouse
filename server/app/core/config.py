@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     detailed_logging_enabled: bool = True
     detailed_log_retention_days: int = 7
     detailed_log_max_bytes: int = 64 * 1024
+    codex_log_max_bytes: int = 32 * 1024 * 1024
+    codex_log_retention_days: int = 90
     default_token_reservation: int = 2048
     allow_insecure_upstreams: bool = False
 
@@ -65,6 +67,20 @@ class Settings(BaseSettings):
     def valid_log_size(cls, value: int) -> int:
         if value < 1024:
             raise ValueError("DETAILED_LOG_MAX_BYTES must be at least 1024")
+        return value
+
+    @field_validator("codex_log_max_bytes")
+    @classmethod
+    def valid_codex_log_size(cls, value: int) -> int:
+        if value < 1024:
+            raise ValueError("CODEX_LOG_MAX_BYTES must be at least 1024")
+        return value
+
+    @field_validator("codex_log_retention_days")
+    @classmethod
+    def valid_codex_log_retention(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("CODEX_LOG_RETENTION_DAYS must be at least 1")
         return value
 
     @field_validator("default_token_reservation")

@@ -16,11 +16,12 @@ import { ProvidersPanel } from "../providers/components/ProvidersPanel";
 import { providerFormSchema, type Provider, type ProviderForm } from "../providers/schemas";
 import { dashboardApi } from "./api";
 import { RecentRequests, UsagePanel } from "./components/ActivityPanels";
+import { CodexLogsPanel } from "./components/CodexLogsPanel";
 import { KeySecretModal, CreateKeyModal } from "./components/KeyModals";
 import { KeysTable } from "./components/KeysTable";
 import { OverviewCards } from "./components/OverviewCards";
 import { RequestDetailModal } from "./components/RequestDetailModal";
-import { keyFormSchema, type GatewayKey, type KeyCreated, type KeyForm, type Overview, type RequestDetail } from "./schemas";
+import { keyFormSchema, type CodexSession, type CodexSessionDetail, type GatewayKey, type KeyCreated, type KeyForm, type Overview, type RequestDetail } from "./schemas";
 
 const { Header, Content } = Layout;
 const { Text, Title } = Typography;
@@ -44,22 +45,29 @@ export function DashboardPage() {
   const [savingUser, setSavingUser] = useState(false);
   const [requestDetail, setRequestDetail] = useState<RequestDetail>();
   const [detailLoading, setDetailLoading] = useState(false);
+  const [codexSessions, setCodexSessions] = useState<CodexSession[]>([]);
+  const [allCodexSessions, setAllCodexSessions] = useState<CodexSession[]>([]);
+  const [codexDetail, setCodexDetail] = useState<CodexSessionDetail>();
+  const [codexLoading, setCodexLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextCurrentUser, nextOverview, nextKeys, nextProviders, nextUsers] = await Promise.all([
+      const [nextCurrentUser, nextOverview, nextKeys, nextProviders, nextUsers, nextCodexSessions] = await Promise.all([
         authApi.me(),
         dashboardApi.overview(),
         dashboardApi.keys(),
         providersApi.list(),
         user?.is_admin ? adminApi.users() : Promise.resolve([]),
+        dashboardApi.codexSessions(),
       ]);
       syncUser(nextCurrentUser);
       setOverview(nextOverview);
       setKeys(nextKeys);
       setProviders(nextProviders);
       setUsers(nextUsers);
+      setCodexSessions(nextCodexSessions);
+      setAllCodexSessions(nextCodexSessions);
     } catch (error) {
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) logout();
       else message.error(error instanceof Error ? error.message : "加载失败");
@@ -190,6 +198,72 @@ export function DashboardPage() {
     }
   };
 
+  const uploadCodexLogs = async (files: File[]) => {
+    if (!files.length) return;
+    try {
+      setCodexLoading(true);
+      const results = [];
+      for (const file of files) results.push(await dashboardApi.importCodexSession(file));
+      const nextSessions = await dashboardApi.codexSessions();
+      setCodexSessions(nextSessions);
+      setAllCodexSessions(nextSessions);
+      const changed = results.filter((item) => item.status !== "unchanged").length;
+      message.success(`已处理 ${results.length} 个文件，新增或更新 ${changed} 个会话`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Codex 日志上传失败");
+    } finally {
+      setCodexLoading(false);
+    }
+  };
+
+  const inspectCodexSession = async (id: string) => {
+    try {
+      setCodexLoading(true);
+      setCodexDetail(await dashboardApi.codexSessionDetail(id));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "读取 Codex 会话失败");
+    } finally {
+      setCodexLoading(false);
+    }
+  };
+
+  const deleteCodexSession = async (id: string) => {
+    try {
+      await dashboardApi.deleteCodexSession(id);
+      setCodexSessions((items) => items.filter((item) => item.session_id !== id));
+      setAllCodexSessions((items) => items.filter((item) => item.session_id !== id));
+      if (codexDetail?.session_id === id) setCodexDetail(undefined);
+      message.success("已删除上传的 Codex 会话");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "删除失败");
+    }
+  };
+
+  const restoreCodexSession = async (id: string) => {
+    try {
+      await dashboardApi.restoreCodexSession(id);
+      setCodexSessions((items) => items.filter((item) => item.session_id !== id));
+      const nextSessions = await dashboardApi.codexSessions();
+      setAllCodexSessions(nextSessions);
+      message.success("会话已恢复");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "恢复失败");
+    }
+  };
+
+  const renameCodexSession = async (id: string, title: string | null) => {
+    try {
+      const updated = await dashboardApi.renameCodexSession(id, title);
+      const replace = (items: CodexSession[]) => items.map((item) => item.session_id === id ? updated : item);
+      setCodexSessions(replace);
+      setAllCodexSessions(replace);
+      if (codexDetail?.session_id === id) setCodexDetail({ ...codexDetail, title: updated.title });
+      message.success("会话标题已更新");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "重命名失败");
+    }
+  };
+
   const baseUrl = `${window.location.origin}/v1`;
   return (
     <Layout className="app-shell">
@@ -223,6 +297,28 @@ export function DashboardPage() {
             <Button icon={<CopyOutlined />} onClick={() => copy(baseUrl)}>复制地址</Button>
           </Card>
           <RecentRequests overview={overview} onInspect={inspectRequest} />
+          <CodexLogsPanel
+            sessions={codexSessions}
+            allSessions={allCodexSessions}
+            detail={codexDetail}
+            loading={codexLoading}
+            onUpload={uploadCodexLogs}
+            onInspect={inspectCodexSession}
+            onDelete={deleteCodexSession}
+            onRestore={restoreCodexSession}
+            onRename={renameCodexSession}
+            onClose={() => setCodexDetail(undefined)}
+            onSearch={async (query, project, deleted) => {
+              try {
+                setCodexLoading(true);
+                setCodexSessions(await dashboardApi.codexSessions(query, project, deleted));
+              } catch (error) {
+                message.error(error instanceof Error ? error.message : "搜索失败");
+              } finally {
+                setCodexLoading(false);
+              }
+            }}
+          />
         </Spin>
       </Content>
 

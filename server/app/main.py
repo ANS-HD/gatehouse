@@ -5,7 +5,17 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import admin, auth, gateway, health, keys, overview, providers, requests
+from app.api.routes import (
+    admin,
+    auth,
+    codex_logs,
+    gateway,
+    health,
+    keys,
+    overview,
+    providers,
+    requests,
+)
 from app.core.config import get_settings
 from app.core.security import encrypt_secret
 from app.services.auth import hash_password
@@ -13,10 +23,11 @@ from app.services.rate_limit import LoginRateLimiter, RequestRateLimiter
 from app.storage.database import Database
 
 
-async def purge_request_logs(db: Database, retention_days: int) -> None:
+async def purge_logs(db: Database, request_days: int, codex_days: int) -> None:
     while True:
         await asyncio.sleep(6 * 60 * 60)
-        await asyncio.to_thread(db.purge_request_details, retention_days)
+        await asyncio.to_thread(db.purge_request_details, request_days)
+        await asyncio.to_thread(db.purge_codex_sessions, codex_days)
 
 
 @asynccontextmanager
@@ -25,7 +36,14 @@ async def lifespan(app: FastAPI):
     db = Database(settings.database_path)
     db.initialize()
     db.purge_request_details(settings.detailed_log_retention_days)
-    purge_task = asyncio.create_task(purge_request_logs(db, settings.detailed_log_retention_days))
+    db.purge_codex_sessions(settings.codex_log_retention_days)
+    purge_task = asyncio.create_task(
+        purge_logs(
+            db,
+            settings.detailed_log_retention_days,
+            settings.codex_log_retention_days,
+        )
+    )
     admin = db.ensure_admin(
         settings.admin_email,
         hash_password(settings.admin_password.get_secret_value()),
@@ -85,6 +103,8 @@ def create_app() -> FastAPI:
         providers.router,
         keys.router,
         requests.router,
+        codex_logs.router,
+        codex_logs.token_router,
         gateway.router,
     ):
         app.include_router(router)

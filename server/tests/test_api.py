@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -135,6 +136,249 @@ class ApiTests(unittest.TestCase):
             401,
         )
         self.login("managed@example.com", "replacement-password")
+
+    def test_codex_session_import_is_encrypted_deduplicated_and_scoped(self) -> None:
+        token, _ = self.login("admin@example.com", "admin-password")
+        headers = {**self.authorization(token), "Content-Type": "application/x-ndjson"}
+        records = [
+            {
+                "timestamp": "2026-09-28T01:00:00Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "session-test-1",
+                    "timestamp": "2026-09-28T01:00:00Z",
+                    "cwd": "/private/project",
+                    "source": "cli",
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:01:00Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "<environment_context>metadata only</environment_context>",
+                        }
+                    ],
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:01:30Z",
+                "type": "event_msg",
+                "payload": {"type": "task_started", "turn_id": "turn-test-1"},
+            },
+            {
+                "timestamp": "2026-09-28T01:01:31Z",
+                "type": "turn_context",
+                "payload": {
+                    "turn_id": "turn-test-1",
+                    "model": "test-codex-model",
+                    "effort": "high",
+                    "cwd": "/private/project",
+                    "workspace_roots": ["/private/project"],
+                    "approval_policy": "on-request",
+                    "sandbox_policy": {"type": "workspace-write"},
+                    "summary": "Earlier decisions",
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:01:32Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "Follow repository rules"}],
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:01:33Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "实现上传功能"}],
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:01:34Z",
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "实现上传功能"},
+            },
+            {
+                "timestamp": "2026-09-28T01:02:00Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "已经完成"}],
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:03:00Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": "call-test-1",
+                    "name": "apply_patch",
+                    "arguments": "*** Begin Patch",
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:03:01Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "call-test-1",
+                    "output": "Done!",
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:03:02Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 100,
+                            "cached_input_tokens": 60,
+                            "output_tokens": 20,
+                            "reasoning_output_tokens": 5,
+                            "total_tokens": 120,
+                        },
+                        "total_token_usage": {"total_tokens": 120},
+                        "model_context_window": 200000,
+                    },
+                },
+            },
+            {
+                "timestamp": "2026-09-28T01:03:03Z",
+                "type": "event_msg",
+                "payload": {"type": "task_complete", "turn_id": "turn-test-1"},
+            },
+        ]
+        raw = "\n".join(json.dumps(item, ensure_ascii=False) for item in records).encode()
+        first = self.client.post(
+            "/api/codex/sessions/import?filename=session.jsonl", headers=headers, content=raw
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.json()["status"], "created")
+        self.assertEqual(first.json()["session"]["title"], "实现上传功能")
+        self.assertEqual(first.json()["session"]["tool_call_count"], 1)
+        self.assertEqual(first.json()["session"]["model"], "test-codex-model")
+        self.assertEqual(first.json()["session"]["turn_count"], 1)
+        self.assertEqual(first.json()["session"]["cached_input_tokens"], 60)
+
+        duplicate = self.client.post(
+            "/api/codex/sessions/import?filename=session.jsonl", headers=headers, content=raw
+        )
+        self.assertEqual(duplicate.json()["status"], "unchanged")
+        sessions = self.client.get("/api/codex/sessions", headers=self.authorization(token)).json()
+        self.assertTrue(any(item["session_id"] == "session-test-1" for item in sessions))
+        detail = self.client.get(
+            "/api/codex/sessions/session-test-1", headers=self.authorization(token)
+        )
+        self.assertEqual(
+            [item["role"] for item in detail.json()["messages"]],
+            ["system", "developer", "user", "assistant"],
+        )
+        turn = detail.json()["turns"][0]
+        self.assertEqual(turn["effort"], "high")
+        self.assertEqual(turn["tool_call_count"], 1)
+        self.assertEqual(turn["events"][0]["role"], "developer")
+        self.assertEqual(
+            [event["role"] for event in turn["events"] if event["kind"] == "message"],
+            ["developer", "user", "assistant"],
+        )
+        self.assertEqual(turn["context"]["summary"], "Earlier decisions")
+        self.assertEqual(turn["context"]["sandbox"], "workspace-write")
+        self.assertEqual(turn["events"][-1]["output"], "Done!")
+        search = self.client.get(
+            "/api/codex/sessions?q=已经完成&project=%2Fprivate%2Fproject",
+            headers=self.authorization(token),
+        )
+        self.assertEqual([item["session_id"] for item in search.json()], ["session-test-1"])
+        no_match = self.client.get(
+            "/api/codex/sessions?q=definitely-not-present", headers=self.authorization(token)
+        )
+        self.assertEqual(no_match.json(), [])
+
+        with app.state.db.connect() as connection:
+            stored = connection.execute(
+                "SELECT title_encrypted, transcript_encrypted FROM codex_sessions "
+                "WHERE session_id = 'session-test-1'"
+            ).fetchone()
+        self.assertNotIn("实现上传功能", stored["title_encrypted"])
+        self.assertNotIn("已经完成", stored["transcript_encrypted"])
+
+        deleted = self.client.delete(
+            "/api/codex/sessions/session-test-1", headers=self.authorization(token)
+        )
+        self.assertEqual(deleted.status_code, 204)
+
+    def test_codex_upload_token_only_authorizes_imports(self) -> None:
+        session_token, _ = self.login("admin@example.com", "admin-password")
+        created = self.client.post(
+            "/api/codex/upload-token", headers=self.authorization(session_token)
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        upload_token = created.json()["token"]
+        self.assertTrue(upload_token.startswith("clu_"))
+
+        raw = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "timestamp": "2026-09-28T02:00:00Z",
+                        "type": "session_meta",
+                        "payload": {
+                            "id": "upload-token-session",
+                            "timestamp": "2026-09-28T02:00:00Z",
+                            "source": "cli",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-09-28T02:01:00Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "token upload"}],
+                        },
+                    }
+                ),
+            ]
+        ).encode()
+        imported = self.client.post(
+            "/api/codex/sessions/import?filename=token.jsonl",
+            headers={
+                "Authorization": f"Bearer {upload_token}",
+                "Content-Type": "application/x-ndjson",
+            },
+            content=raw,
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertEqual(
+            self.client.get(
+                "/api/codex/sessions", headers=self.authorization(upload_token)
+            ).status_code,
+            401,
+        )
+
+        revoked = self.client.delete(
+            "/api/codex/upload-token", headers=self.authorization(session_token)
+        )
+        self.assertEqual(revoked.status_code, 204)
+        rejected = self.client.post(
+            "/api/codex/sessions/import?filename=token.jsonl",
+            headers={"Authorization": f"Bearer {upload_token}"},
+            content=raw,
+        )
+        self.assertEqual(rejected.status_code, 401)
 
 
 if __name__ == "__main__":
