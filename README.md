@@ -124,6 +124,29 @@ python3 deploy/upload_codex_logs.py \
 
 备份默认写入 `./backups/<UTC 时间>/`，权限为仅当前用户可读。建议再把该目录同步到加密的异机存储。恢复前先停止服务，将备份的 `gateway.db` 放回数据卷，并确保使用同一份 `.env`；`SESSION_SECRET` 丢失后，上游密钥和详细日志将无法解密。
 
+## GitHub Actions 自动部署
+
+仓库包含 `.github/workflows/deploy.yml`。向 `master` 推送代码时会自动部署，也可以在 GitHub 的
+**Actions → Deploy production → Run workflow** 中手动触发。部署过程会先运行 `deploy/backup.sh`，
+再快进更新代码、重建 Compose 服务，并检查本机及公网健康接口。
+
+首次使用前，在 GitHub 仓库的 **Settings → Environments** 中创建 `production` 环境，并设置：
+
+| 类型 | 名称 | 值 |
+| --- | --- | --- |
+| Secret | `VPS_HOST` | VPS 的域名或 IP |
+| Secret | `VPS_USER` | 有权读取仓库和运行 Docker 的 SSH 用户 |
+| Secret | `VPS_SSH_KEY` | 该用户对应的专用 SSH 私钥全文 |
+| Secret | `VPS_KNOWN_HOSTS` | 已经人工核对指纹的 SSH `known_hosts` 记录 |
+| Variable | `VPS_PORT` | SSH 端口；未设置时使用 `22` |
+| Variable | `VPS_DEPLOY_PATH` | VPS 上 Gatehouse 仓库的绝对路径 |
+| Variable | `LOCAL_HEALTH_URL` | VPS 本机健康地址；未设置时使用 `http://127.0.0.1:8080/health` |
+
+不要把 VPS 登录密码、SSH 私钥或生产 `.env` 提交到 Git。服务器上的部署目录应预先完成首次部署，
+保持在 `master` 分支且不能有已跟踪文件的未提交修改。若仓库为私有仓库，还需让服务器上的 Git
+远程具备只读拉取权限。建议为 `production` 环境限制只允许 `master` 分支部署；需要人工确认时，
+还可以配置 required reviewer。
+
 ## 开发
 
 服务端按职责拆分：

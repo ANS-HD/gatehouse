@@ -45,6 +45,13 @@ body {
 .auth-tabs .ant-tabs-nav { margin-bottom: 1.25rem; }
 .auth-tabs .ant-tabs-tab { min-width: 64px; justify-content: center; }
 .login-form { margin-top: .25rem; }
+.test-account { margin-top: 1.25rem; padding: .9rem 1rem; background: rgba(124, 247, 212, .04); border: 1px solid rgba(124, 247, 212, .18); border-radius: 10px; }
+.test-account-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.test-account-header .ant-btn { height: auto; padding: 0; font-size: .875rem; }
+.test-account-credentials { display: grid; gap: .45rem; margin: .75rem 0 0; font-size: .875rem; }
+.test-account-credentials > div { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .75rem; }
+.test-account-credentials dt { color: #98aabe; }
+.test-account-credentials dd { min-width: 0; margin: 0; color: #d5ece7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 
 .app-shell { min-height: 100vh; background: transparent; }
 .topbar { position: sticky; top: 0; z-index: 10; height: 68px; padding: 0 clamp(1rem, 4vw, 4rem); line-height: normal; background: rgba(7, 17, 31, .84); border-bottom: 1px solid rgba(91, 129, 157, .18); backdrop-filter: blur(18px); }
@@ -87,6 +94,16 @@ body {
 .endpoint-card .ant-card-body { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .endpoint-value { display: flex; align-items: center; gap: .75rem; margin-top: .55rem; font-size: 1rem; }
 .endpoint-value > .anticon { color: #7cf7d4; }
+.api-examples-card { margin-top: 16px; }
+.api-example-selector { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+.api-example-selector label { color: #adc2d4; }
+.api-example-selector .ant-select { flex: 1 1 260px; min-width: 0; max-width: 520px; }
+.api-example-selector .ant-tag { margin: 0; }
+.api-example-key-note { display: grid; gap: .55rem; padding: 1rem; background: #091827; border: 1px solid #173149; border-radius: 9px; }
+.api-example-key-note > .ant-typography { min-width: 0; overflow-wrap: anywhere; }
+.api-example-key-note code { white-space: pre-wrap; }
+.api-example-code { max-width: 100%; margin: 0 0 1rem; padding: 1rem; overflow-x: auto; color: #c8d8e8; background: #071421; border: 1px solid #173149; border-radius: 9px; font: .875rem/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2; }
+.api-example-code code { font: inherit; }
 .recent-card { margin-top: 16px; }
 .codex-logs-card { margin-top: 16px; }
 .codex-summary { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 12px; margin-bottom: 18px; }

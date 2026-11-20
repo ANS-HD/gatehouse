@@ -16,6 +16,7 @@ import { ProvidersPanel } from "../providers/components/ProvidersPanel";
 import { providerFormSchema, type Provider, type ProviderForm } from "../providers/schemas";
 import { dashboardApi } from "./api";
 import { RecentRequests, UsagePanel } from "./components/ActivityPanels";
+import { ApiExamplesPanel } from "./components/ApiExamplesPanel";
 import { CodexLogsPanel } from "./components/CodexLogsPanel";
 import { KeySecretModal, CreateKeyModal } from "./components/KeyModals";
 import { KeysTable } from "./components/KeysTable";
@@ -183,8 +184,12 @@ export function DashboardPage() {
   };
 
   const copy = async (value: string) => {
-    await navigator.clipboard.writeText(value);
-    message.success("已复制");
+    try {
+      await navigator.clipboard.writeText(value);
+      message.success("已复制");
+    } catch {
+      message.error("复制失败，请手动选中内容复制");
+    }
   };
 
   const inspectRequest = async (id: number) => {
@@ -316,6 +321,7 @@ export function DashboardPage() {
             <div><Text type="secondary">API Base URL</Text><div className="endpoint-value"><ApiOutlined /><Text code>{baseUrl}</Text></div></div>
             <Button icon={<CopyOutlined />} onClick={() => copy(baseUrl)}>复制地址</Button>
           </Card>
+          <ApiExamplesPanel baseUrl={baseUrl} keys={keys} providers={providers} onCopy={copy} />
           <RecentRequests overview={overview} onInspect={inspectRequest} />
           <CodexLogsPanel
             sessions={codexSessions}

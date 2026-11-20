@@ -14,6 +14,11 @@ import {
 
 const { Text, Title } = Typography;
 
+const TEST_ACCOUNT: LoginForm = {
+  email: "admin@163.com",
+  password: "12345678",
+};
+
 export function AuthPage() {
   const { message } = App.useApp();
   const { complete } = useAuth();
@@ -87,11 +92,23 @@ export function AuthPage() {
 }
 
 function LoginForm({ loading, onSubmit }: { loading: boolean; onSubmit: (data: LoginForm) => void }) {
+  const [form] = Form.useForm<LoginForm>();
+
   return (
-    <Form layout="vertical" onFinish={onSubmit} requiredMark={false} className="login-form">
+    <Form form={form} layout="vertical" onFinish={onSubmit} requiredMark={false} className="login-form">
       <Form.Item name="email" label="邮箱"><Input size="large" autoComplete="email" placeholder="you@example.com" /></Form.Item>
       <Form.Item name="password" label="密码"><Input.Password size="large" autoComplete="current-password" placeholder="输入密码" /></Form.Item>
       <Button type="primary" htmlType="submit" size="large" loading={loading} block>登录</Button>
+      <section className="test-account" aria-label="测试账号">
+        <div className="test-account-header">
+          <Text strong>体验账号</Text>
+          <Button type="link" size="small" disabled={loading} onClick={() => form.setFieldsValue(TEST_ACCOUNT)}>一键填入</Button>
+        </div>
+        <dl className="test-account-credentials">
+          <div><dt>账号</dt><dd>{TEST_ACCOUNT.email}</dd></div>
+          <div><dt>密码</dt><dd>{TEST_ACCOUNT.password}</dd></div>
+        </dl>
+      </section>
     </Form>
   );
 }
