@@ -101,7 +101,9 @@ jobs:
             exit 1
           fi
 
-          ./deploy/backup.sh
+          # The deployed backup script may predate the stdin fix. Keep it
+          # from consuming the rest of this SSH heredoc before pulling updates.
+          ./deploy/backup.sh </dev/null
           git fetch --prune origin master
           git merge --ff-only origin/master
 
@@ -125,6 +127,24 @@ jobs:
           echo "Local health check failed: $local_health_url" >&2
           exit 1
           REMOTE
+
+      - name: Verify deployed revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          deployed_sha=$(ssh \
+            -n \
+            -i "$HOME/.ssh/gatehouse_deploy" \
+            -p "$VPS_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" \
+            "git -C '$VPS_DEPLOY_PATH' rev-parse HEAD")
+          if [[ "$deployed_sha" != "$GITHUB_SHA" ]]; then
+            echo "Deployed revision does not match the triggering commit." >&2
+            exit 1
+          fi
+          echo "Deployed commit: $deployed_sha"
 
       - name: Verify public endpoint
         shell: bash

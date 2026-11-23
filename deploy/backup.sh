@@ -12,10 +12,10 @@ chmod 700 "$backup_dir"
 cd "$project_dir"
 
 docker compose exec -T api python -c \
-  'import sqlite3; source = sqlite3.connect("/data/gateway.db"); target = sqlite3.connect("/data/gateway.backup.db"); source.backup(target); target.close(); source.close()'
+  'import sqlite3; source = sqlite3.connect("/data/gateway.db"); target = sqlite3.connect("/data/gateway.backup.db"); source.backup(target); target.close(); source.close()' </dev/null
 docker compose cp api:/data/gateway.backup.db "$backup_dir/$database_name"
 docker compose exec -T api python -c \
-  'from pathlib import Path; Path("/data/gateway.backup.db").unlink(missing_ok=True)'
+  'from pathlib import Path; Path("/data/gateway.backup.db").unlink(missing_ok=True)' </dev/null
 
 chmod 600 "$backup_dir/$database_name"
 if [ -f .env ]; then
