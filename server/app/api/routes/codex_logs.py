@@ -16,6 +16,7 @@ from app.core.security import (
 from app.schemas.codex_logs import (
     CodexImportResult,
     CodexSessionDetail,
+    CodexSessionPage,
     CodexSessionRename,
     CodexSessionView,
     CodexUploadTokenCreated,
@@ -78,7 +79,7 @@ def _view(row: dict, secret: str) -> dict:
     }
 
 
-@router.get("", response_model=list[CodexSessionView])
+@router.get("", response_model=CodexSessionPage)
 def list_sessions(
     user: CurrentUser,
     db: DatabaseDep,
@@ -86,28 +87,45 @@ def list_sessions(
     q: Annotated[str | None, Query(max_length=200)] = None,
     project: Annotated[str | None, Query(max_length=500)] = None,
     deleted: bool = False,
-) -> list[dict]:
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+) -> dict:
     secret = settings.session_secret.get_secret_value()
     query = q.strip().casefold() if q else None
     project_filter = project.strip().casefold() if project else None
     result = []
-    for row in db.list_codex_sessions(user["id"], deleted=deleted):
-        cwd = _decrypt(row.get("cwd_encrypted"), secret)
-        title = _decrypt(row.get("title_encrypted"), secret) or "Untitled Codex session"
+    projects: set[str] = set()
+    for row in db.iter_codex_sessions(
+        user["id"], deleted=deleted, include_transcript=bool(query)
+    ):
+        view = _view(row, secret)
+        cwd = view["cwd"]
+        if cwd:
+            projects.add(cwd)
         if project_filter and (cwd or "").casefold() != project_filter:
             continue
         if query:
-            transcript = _decrypt(row.get("transcript_encrypted"), secret) or ""
-            message_text = "\n".join(
-                message["text"] for message in messages_from_transcript(transcript, limit=10_000)
-            )
-            haystack = "\n".join(
-                (title, cwd or "", row.get("model") or "", message_text)
-            ).casefold()
+            haystack = "\n".join((view["title"], cwd or "", row.get("model") or "")).casefold()
             if query not in haystack:
-                continue
-        result.append(_view(row, secret))
-    return result[:100]
+                transcript = _decrypt(row.get("transcript_encrypted"), secret) or ""
+                message_text = "\n".join(
+                    message["text"]
+                    for message in messages_from_transcript(transcript, limit=10_000)
+                ).casefold()
+                if query not in message_text:
+                    continue
+        result.append(view)
+    total = len(result)
+    page = min(page, max(1, (total + page_size - 1) // page_size))
+    start = (page - 1) * page_size
+    return {
+        "items": result[start:start + page_size],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "summary": db.codex_session_summary(user["id"]),
+        "projects": sorted(projects),
+    }
 
 
 @router.post("/import", response_model=CodexImportResult)

@@ -1,7 +1,7 @@
 import { CheckCircleFilled, EyeOutlined, StopOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, Typography } from "antd";
+import { Button, Card, Empty, Pagination, Spin, Typography } from "antd";
 import { compactNumber, formatDate, integer } from "../../../lib/format";
-import type { Overview } from "../schemas";
+import type { Overview, RequestPage } from "../schemas";
 
 const { Text } = Typography;
 
@@ -20,23 +20,43 @@ export function UsagePanel({ overview }: { overview?: Overview }) {
   );
 }
 
-export function RecentRequests({ overview, onInspect }: { overview?: Overview; onInspect: (id: number) => void }) {
+export function RecentRequests({ data, page, pageSize, loading, onPageChange, onInspect }: {
+  data?: RequestPage;
+  page: number;
+  pageSize: number;
+  loading: boolean;
+  onPageChange: (page: number, pageSize: number) => void;
+  onInspect: (id: number) => void;
+}) {
   return (
     <Card variant="borderless" className="panel-card recent-card" title="最近请求">
-      <div className="request-list">
-        {overview?.recent.length ? overview.recent.map((item) => (
-          <div className="request-item" key={item.id}>
-            <div className={`request-status ${item.status_code < 400 ? "ok" : "error"}`}>
-              {item.status_code < 400 ? <CheckCircleFilled /> : <StopOutlined />}
+      <Spin spinning={loading}>
+        <div className="request-list">
+          {data?.items.length ? data.items.map((item) => (
+            <div className="request-item" key={item.id}>
+              <div className={`request-status ${item.status_code < 400 ? "ok" : "error"}`}>
+                {item.status_code < 400 ? <CheckCircleFilled /> : <StopOutlined />}
+              </div>
+              <div className="request-main"><Text strong>{item.endpoint}</Text><Text type="secondary">{item.provider_name} · {item.key_name} · {item.model || "—"}</Text></div>
+              <Text className="request-metric">{integer.format(item.total_tokens)} tok</Text>
+              <Text className="request-metric">{item.latency_ms} ms</Text>
+              <Text type="secondary" className="request-time">{formatDate(item.created_at)}</Text>
+              <Button type="text" icon={<EyeOutlined />} onClick={() => onInspect(item.id)} aria-label="查看请求详情" />
             </div>
-            <div className="request-main"><Text strong>{item.endpoint}</Text><Text type="secondary">{item.provider_name} · {item.key_name} · {item.model || "—"}</Text></div>
-            <Text className="request-metric">{integer.format(item.total_tokens)} tok</Text>
-            <Text className="request-metric">{item.latency_ms} ms</Text>
-            <Text type="secondary" className="request-time">{formatDate(item.created_at)}</Text>
-            <Button type="text" icon={<EyeOutlined />} onClick={() => onInspect(item.id)} aria-label="查看请求详情" />
-          </div>
-        )) : <Empty description="成功调用后会显示在这里" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
-      </div>
+          )) : <Empty description="成功调用后会显示在这里" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+        </div>
+        <Pagination
+          className="log-pagination"
+          current={page}
+          pageSize={pageSize}
+          total={data?.total ?? 0}
+          showSizeChanger
+          pageSizeOptions={[10, 20, 50, 100]}
+          showTotal={(total) => `共 ${total} 条请求`}
+          onChange={onPageChange}
+          disabled={loading}
+        />
+      </Spin>
     </Card>
   );
 }

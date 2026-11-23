@@ -198,6 +198,7 @@ body {
 .codex-turn-timeline-title { position: sticky; top: 0; z-index: 1; padding: 5px 0 8px; background: #101c2c; }
 .recent-card .ant-empty { margin-block: 32px; }
 .request-list { display: grid; }
+.log-pagination { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 .request-item { display: grid; grid-template-columns: 28px minmax(190px, 1fr) 90px 90px 110px 36px; align-items: center; gap: .8rem; min-height: 62px; border-bottom: 1px solid #12273b; }
 .request-item:last-child { border-bottom: 0; }
 .request-status { font-size: .9rem; }
@@ -239,6 +240,7 @@ body {
 }
 
 @media (max-width: 560px) {
+  .log-pagination.ant-pagination .ant-pagination-options { display: inline-flex; margin-inline-start: 0; }
   .codex-session-timing, .codex-turn-timing { grid-template-columns: 1fr; }
   .codex-clock-event { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .codex-clock-time { align-items: flex-start; padding: .5rem 0 .5rem 1.25rem; text-align: left; border-left: 1px solid #28516b; }

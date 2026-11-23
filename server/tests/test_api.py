@@ -280,7 +280,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(duplicate.json()["status"], "unchanged")
         sessions = self.client.get("/api/codex/sessions", headers=self.authorization(token)).json()
-        self.assertTrue(any(item["session_id"] == "session-test-1" for item in sessions))
+        self.assertTrue(any(item["session_id"] == "session-test-1" for item in sessions["items"]))
         with app.state.db.connect() as connection:
             connection.execute(
                 "UPDATE codex_sessions SET derived_version = 5 WHERE session_id = ?",
@@ -312,11 +312,14 @@ class ApiTests(unittest.TestCase):
             "/api/codex/sessions?q=已经完成&project=%2Fprivate%2Fproject",
             headers=self.authorization(token),
         )
-        self.assertEqual([item["session_id"] for item in search.json()], ["session-test-1"])
+        self.assertEqual(
+            [item["session_id"] for item in search.json()["items"]], ["session-test-1"]
+        )
         no_match = self.client.get(
             "/api/codex/sessions?q=definitely-not-present", headers=self.authorization(token)
         )
-        self.assertEqual(no_match.json(), [])
+        self.assertEqual(no_match.json()["items"], [])
+        self.assertEqual(no_match.json()["total"], 0)
 
         with app.state.db.connect() as connection:
             stored = connection.execute(

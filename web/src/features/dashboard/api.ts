@@ -5,24 +5,32 @@ import {
   keysSchema,
   overviewSchema,
   requestDetailSchema,
+  requestPageSchema,
   codexImportResultSchema,
   codexSessionSchema,
   codexSessionDetailSchema,
-  codexSessionsSchema,
+  codexSessionPageSchema,
   type GatewayKey,
   type KeyForm,
 } from "./schemas";
 
 export const dashboardApi = {
   overview: () => apiRequest("/api/overview", overviewSchema),
+  requests: (page = 1, pageSize = 10) =>
+    apiRequest(`/api/requests?page=${page}&page_size=${pageSize}`, requestPageSchema),
   requestDetail: (id: number) => apiRequest(`/api/requests/${id}`, requestDetailSchema),
-  codexSessions: (q?: string, project?: string, deleted = false) => {
-    const params = new URLSearchParams();
+  codexSessions: ({ q, project, deleted = false, page = 1, pageSize = 10 }: {
+    q?: string;
+    project?: string;
+    deleted?: boolean;
+    page?: number;
+    pageSize?: number;
+  } = {}) => {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
     if (q?.trim()) params.set("q", q.trim());
     if (project) params.set("project", project);
     if (deleted) params.set("deleted", "true");
-    const suffix = params.size ? `?${params}` : "";
-    return apiRequest(`/api/codex/sessions${suffix}`, codexSessionsSchema);
+    return apiRequest(`/api/codex/sessions?${params}`, codexSessionPageSchema);
   },
   codexSessionDetail: (id: string) =>
     apiRequest(`/api/codex/sessions/${encodeURIComponent(id)}`, codexSessionDetailSchema),

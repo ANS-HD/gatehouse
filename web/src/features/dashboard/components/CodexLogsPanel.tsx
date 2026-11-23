@@ -1,8 +1,8 @@
 import { ClockCircleOutlined, DeleteOutlined, EditOutlined, EyeOutlined, FolderOpenOutlined, RestOutlined, UploadOutlined } from "@ant-design/icons";
-import { Button, Card, Descriptions, Empty, Flex, Input, Modal, Popconfirm, Progress, Select, Space, Statistic, Switch, Tabs, Tag, Typography } from "antd";
+import { Button, Card, Descriptions, Empty, Flex, Input, Modal, Pagination, Popconfirm, Progress, Select, Space, Spin, Statistic, Switch, Tabs, Tag, Typography } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { compactNumber, formatDate, integer } from "../../../lib/format";
-import type { CodexSession, CodexSessionDetail } from "../schemas";
+import type { CodexSession, CodexSessionPage, CodexSessionDetail } from "../schemas";
 import { elapsedMs, formatElapsed, formatLogTime, formatTurnOffset, turnTiming } from "../codex-timing";
 
 const { Paragraph, Text } = Typography;
@@ -170,8 +170,10 @@ function contextPercent(session: CodexSession) {
 }
 
 export function CodexLogsPanel({
-  sessions,
-  allSessions,
+  data,
+  page,
+  pageSize,
+  onPageChange,
   detail,
   loading,
   onUpload,
@@ -182,8 +184,10 @@ export function CodexLogsPanel({
   onClose,
   onSearch,
 }: {
-  sessions: CodexSession[];
-  allSessions: CodexSession[];
+  data?: CodexSessionPage;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number, pageSize: number) => void;
   detail?: CodexSessionDetail;
   loading: boolean;
   onUpload: (files: File[]) => void;
@@ -200,16 +204,9 @@ export function CodexLogsPanel({
   const [project, setProject] = useState<string>();
   const [showDeleted, setShowDeleted] = useState(false);
   const [selectedTurnId, setSelectedTurnId] = useState<string>();
-  const projects = useMemo(
-    () => Array.from(new Set(allSessions.map((item) => item.cwd).filter(Boolean) as string[])).sort(),
-    [allSessions],
-  );
-  const totals = useMemo(() => ({
-    turns: allSessions.reduce((sum, item) => sum + item.turn_count, 0),
-    messages: allSessions.reduce((sum, item) => sum + item.message_count, 0),
-    tools: allSessions.reduce((sum, item) => sum + item.tool_call_count, 0),
-    tokens: allSessions.reduce((sum, item) => sum + item.total_tokens, 0),
-  }), [allSessions]);
+  const sessions = data?.items ?? [];
+  const projects = data?.projects ?? [];
+  const totals = data?.summary;
   const sessionTiming = useMemo(() => {
     const durations = detail?.turns.map((turn) => turnTiming(turn).durationMs)
       .filter((value): value is number => value !== null) ?? [];
@@ -302,19 +299,20 @@ export function CodexLogsPanel({
         )}
       >
         <div className="codex-summary">
-          <Statistic title="会话" value={allSessions.length} />
-          <Statistic title="轮次" value={totals.turns} formatter={(value) => compactNumber.format(Number(value))} />
-          <Statistic title="工具调用" value={totals.tools} formatter={(value) => compactNumber.format(Number(value))} />
-          <Statistic title="Token" value={totals.tokens} formatter={(value) => compactNumber.format(Number(value))} />
+          <Statistic title="会话" value={totals?.sessions ?? 0} />
+          <Statistic title="轮次" value={totals?.turns ?? 0} formatter={(value) => compactNumber.format(Number(value))} />
+          <Statistic title="工具调用" value={totals?.tools ?? 0} formatter={(value) => compactNumber.format(Number(value))} />
+          <Statistic title="Token" value={totals?.tokens ?? 0} formatter={(value) => compactNumber.format(Number(value))} />
         </div>
         <Flex gap={10} className="codex-filters" wrap="wrap">
           <Input.Search
             allowClear
             value={query}
+            maxLength={200}
             placeholder="搜索标题、项目、模型和会话正文"
             enterButton="搜索"
             onChange={(event) => setQuery(event.target.value)}
-            onSearch={() => onSearch(query, project, showDeleted)}
+            onSearch={(value) => onSearch(value, project, showDeleted)}
           />
           <Select
             allowClear
@@ -329,59 +327,72 @@ export function CodexLogsPanel({
           />
           <Space><Switch checked={showDeleted} onChange={(value) => { setShowDeleted(value); onSearch(query, project, value); }} /><Text type="secondary">回收站</Text></Space>
         </Flex>
-        {sessions.length ? (
-          <div className="codex-session-list">
-            {sessions.map((session) => (
-              <div className="codex-session-item" key={session.session_id}>
-                <div className="codex-session-main">
-                  <Text strong ellipsis={{ tooltip: session.title }}>{session.title}</Text>
-                  <Text type="secondary" ellipsis={{ tooltip: session.cwd || undefined }}>
-                    {session.cwd || "未知目录"} · {formatDate(session.started_at)}
-                  </Text>
-                  <Text type="secondary" title="首条至末条日志的时间跨度，包含轮间等待"><ClockCircleOutlined /> 会话跨度 {formatElapsed(elapsedMs(session.started_at, session.ended_at))}</Text>
-                </div>
-                <div className="codex-session-metrics">
-                  <div><Text type="secondary">模型</Text><Tag>{session.model || session.source}</Tag></div>
-                  <div><Text type="secondary">Token</Text><Text>{compactNumber.format(session.total_tokens)}</Text></div>
-                  <div><Text type="secondary">轮次</Text><Text>{integer.format(session.turn_count)}</Text></div>
-                  <div><Text type="secondary">工具调用</Text><Text>{integer.format(session.tool_call_count)}</Text></div>
-                  <div className="codex-context-metric">
-                    <Text type="secondary">上下文</Text>
-                    {session.context_window ? (
-                      <span>
-                        <Text>{compactNumber.format(session.context_tokens)} / {compactNumber.format(session.context_window)}</Text>
-                        <Progress percent={contextPercent(session)} size="small" showInfo={false} />
-                      </span>
-                    ) : <Text>—</Text>}
+        <Spin spinning={loading}>
+          {sessions.length ? (
+            <div className="codex-session-list">
+              {sessions.map((session) => (
+                <div className="codex-session-item" key={session.session_id}>
+                  <div className="codex-session-main">
+                    <Text strong ellipsis={{ tooltip: session.title }}>{session.title}</Text>
+                    <Text type="secondary" ellipsis={{ tooltip: session.cwd || undefined }}>
+                      {session.cwd || "未知目录"} · {formatDate(session.started_at)}
+                    </Text>
+                    <Text type="secondary" title="首条至末条日志的时间跨度，包含轮间等待"><ClockCircleOutlined /> 会话跨度 {formatElapsed(elapsedMs(session.started_at, session.ended_at))}</Text>
                   </div>
+                  <div className="codex-session-metrics">
+                    <div><Text type="secondary">模型</Text><Tag>{session.model || session.source}</Tag></div>
+                    <div><Text type="secondary">Token</Text><Text>{compactNumber.format(session.total_tokens)}</Text></div>
+                    <div><Text type="secondary">轮次</Text><Text>{integer.format(session.turn_count)}</Text></div>
+                    <div><Text type="secondary">工具调用</Text><Text>{integer.format(session.tool_call_count)}</Text></div>
+                    <div className="codex-context-metric">
+                      <Text type="secondary">上下文</Text>
+                      {session.context_window ? (
+                        <span>
+                          <Text>{compactNumber.format(session.context_tokens)} / {compactNumber.format(session.context_window)}</Text>
+                          <Progress percent={contextPercent(session)} size="small" showInfo={false} />
+                        </span>
+                      ) : <Text>—</Text>}
+                    </div>
+                  </div>
+                  <Space size={2}>
+                    {!showDeleted ? <Button
+                      type="text"
+                      icon={<EyeOutlined />}
+                      onClick={() => onInspect(session.session_id)}
+                      aria-label="查看 Codex 会话"
+                    /> : null}
+                    {!showDeleted ? <Button
+                      type="text"
+                      icon={<EditOutlined />}
+                      onClick={() => {
+                        const value = window.prompt("会话标题（留空恢复自动标题）", session.title);
+                        if (value !== null) onRename(session.session_id, value.trim() || null);
+                      }}
+                      aria-label="重命名 Codex 会话"
+                    /> : null}
+                    {showDeleted ? <Button type="text" icon={<RestOutlined />} onClick={() => onRestore(session.session_id)} aria-label="恢复 Codex 会话" /> : null}
+                    {!showDeleted ? <Popconfirm title="移到回收站？" onConfirm={() => onDelete(session.session_id)}>
+                      <Button type="text" danger icon={<DeleteOutlined />} aria-label="删除 Codex 会话" />
+                    </Popconfirm> : null}
+                  </Space>
                 </div>
-                <Space size={2}>
-                  {!showDeleted ? <Button
-                    type="text"
-                    icon={<EyeOutlined />}
-                    onClick={() => onInspect(session.session_id)}
-                    aria-label="查看 Codex 会话"
-                  /> : null}
-                  {!showDeleted ? <Button
-                    type="text"
-                    icon={<EditOutlined />}
-                    onClick={() => {
-                      const value = window.prompt("会话标题（留空恢复自动标题）", session.title);
-                      if (value !== null) onRename(session.session_id, value.trim() || null);
-                    }}
-                    aria-label="重命名 Codex 会话"
-                  /> : null}
-                  {showDeleted ? <Button type="text" icon={<RestOutlined />} onClick={() => onRestore(session.session_id)} aria-label="恢复 Codex 会话" /> : null}
-                  {!showDeleted ? <Popconfirm title="移到回收站？" onConfirm={() => onDelete(session.session_id)}>
-                    <Button type="text" danger icon={<DeleteOutlined />} aria-label="删除 Codex 会话" />
-                  </Popconfirm> : null}
-                </Space>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Empty description="可上传 ~/.codex/sessions 下的 JSONL 文件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        )}
+              ))}
+            </div>
+          ) : (
+            <Empty description={showDeleted ? "回收站中没有匹配的会话" : query || project ? "没有匹配的会话" : "可上传 ~/.codex/sessions 下的 JSONL 文件"} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          )}
+          <Pagination
+            className="log-pagination"
+            current={page}
+            pageSize={pageSize}
+            total={data?.total ?? 0}
+            showSizeChanger
+            pageSizeOptions={[10, 20, 50, 100]}
+            showTotal={(total) => `共 ${total} 个会话`}
+            onChange={onPageChange}
+            disabled={loading}
+          />
+        </Spin>
       </Card>
       <Modal
         open={Boolean(detail)}

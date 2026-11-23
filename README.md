@@ -42,6 +42,8 @@ sudo systemctl reload caddy
 首次启动会根据 `ADMIN_EMAIL` 和 `ADMIN_PASSWORD` 创建或更新管理员账户。登录后，管理员先配置供应商及允许使用的模型，再到“用户与授权”中为普通用户分配模型、RPM 和共享 Token 总额度。普通用户可在登录页注册；如不希望开放注册，将 `REGISTRATION_ENABLED` 设置为 `false`。
 
 管理员可以直接新增用户，也可以在编辑用户时填写新密码完成重置。密码至少 8 个字符。
+登录页可点击“立即注册”，填写邮箱、密码和确认密码后自动登录。新账户的模型使用权限由管理员分配；
+关闭注册时页面会显示相应提示，注册设置加载失败时可重试。
 
 添加供应商时，可快速选择阿里云百炼北京或新加坡地域，并从下拉列表选择常用通义千问模型。
 填写上游 Base URL 和 API Key 后，点击“获取模型列表”可加载上游返回的模型并搜索、多选；
@@ -77,6 +79,10 @@ OpenAI 兼容协议默认开放 `responses`、`chat/completions`、`embeddings`�
 ## 详细请求日志
 
 最近请求右侧的查看按钮可以打开请求与响应详情，包括请求方法、查询参数、请求头、请求正文、响应头和响应正文。正文与请求头使用 `SESSION_SECRET` 派生的密钥加密保存。
+最近请求和 Codex 会话均支持服务端分页，默认每页 10 条，可切换为 20、50 或 100 条。
+Codex 搜索、项目筛选和回收站会重置到第一页，顶部统计始终汇总当前账户的全部有效会话。
+列表接口 `GET /api/requests` 和 `GET /api/codex/sessions` 接受 `page`、`page_size`，返回
+`items`、`total`、`page`、`page_size`；Codex 接口还返回 `summary` 和 `projects`。
 
 ```dotenv
 DETAILED_LOGGING_ENABLED=true

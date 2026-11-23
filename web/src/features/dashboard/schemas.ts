@@ -20,6 +20,26 @@ export const gatewayKeySchema = z.object({
 export const keyCreatedSchema = gatewayKeySchema.extend({ key: z.string() });
 export const keysSchema = z.array(gatewayKeySchema);
 
+export const requestSchema = z.object({
+  id: z.number().int(),
+  key_name: z.string(),
+  provider_name: z.string(),
+  endpoint: z.string(),
+  model: z.string().nullable(),
+  status_code: z.number().int(),
+  total_tokens: z.number().int(),
+  latency_ms: z.number().int(),
+  error: z.string().nullable(),
+  created_at: z.string(),
+});
+
+export const requestPageSchema = z.object({
+  items: z.array(requestSchema),
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+});
+
 export const overviewSchema = z.object({
   summary: z.object({
     active_keys: z.number().int(),
@@ -27,20 +47,7 @@ export const overviewSchema = z.object({
     tokens_24h: z.number().int(),
     errors_24h: z.number().int(),
   }),
-  recent: z.array(
-    z.object({
-      id: z.number().int(),
-      key_name: z.string(),
-      provider_name: z.string(),
-      endpoint: z.string(),
-      model: z.string().nullable(),
-      status_code: z.number().int(),
-      total_tokens: z.number().int(),
-      latency_ms: z.number().int(),
-      error: z.string().nullable(),
-      created_at: z.string(),
-    }),
-  ),
+  recent: z.array(requestSchema),
   daily: z.array(
     z.object({
       date: z.string(),
@@ -98,7 +105,20 @@ export const codexSessionSchema = z.object({
   deleted_at: z.string().nullable(),
 });
 
-export const codexSessionsSchema = z.array(codexSessionSchema);
+export const codexSessionPageSchema = z.object({
+  items: z.array(codexSessionSchema),
+  total: z.number().int(),
+  page: z.number().int(),
+  page_size: z.number().int(),
+  summary: z.object({
+    sessions: z.number().int(),
+    turns: z.number().int(),
+    messages: z.number().int(),
+    tools: z.number().int(),
+    tokens: z.number().int(),
+  }),
+  projects: z.array(z.string()),
+});
 export const codexSessionDetailSchema = codexSessionSchema.extend({
   messages: z.array(z.object({
     role: z.string(),
@@ -185,7 +205,9 @@ export const keyFormSchema = z.object({
 export type GatewayKey = z.infer<typeof gatewayKeySchema>;
 export type KeyCreated = z.infer<typeof keyCreatedSchema>;
 export type Overview = z.infer<typeof overviewSchema>;
+export type RequestPage = z.infer<typeof requestPageSchema>;
 export type RequestDetail = z.infer<typeof requestDetailSchema>;
 export type CodexSession = z.infer<typeof codexSessionSchema>;
+export type CodexSessionPage = z.infer<typeof codexSessionPageSchema>;
 export type CodexSessionDetail = z.infer<typeof codexSessionDetailSchema>;
 export type KeyForm = z.infer<typeof keyFormSchema>;

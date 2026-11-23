@@ -417,23 +417,37 @@ class Database:
                     )
         return "updated" if existing else "created"
 
-    def list_codex_sessions(
-        self, owner_id: str, limit: int = 500, deleted: bool = False
-    ) -> list[dict[str, Any]]:
+    def iter_codex_sessions(
+        self, owner_id: str, *, deleted: bool = False, include_transcript: bool = False
+    ) -> Iterator[dict[str, Any]]:
         deleted_filter = "deleted_at IS NOT NULL" if deleted else "deleted_at IS NULL"
+        transcript_column = "transcript_encrypted," if include_transcript else ""
         with self.connect() as connection:
             rows = connection.execute(
                 f"""SELECT session_id, source, cwd_encrypted, title_encrypted,
                 custom_title_encrypted,
-                transcript_encrypted, started_at, ended_at, event_count, message_count,
+                {transcript_column} started_at, ended_at, event_count, message_count,
                 user_message_count, assistant_message_count, tool_call_count, turn_count, model,
                 total_tokens, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens,
                 context_tokens, context_window, byte_count, imported_at, deleted_at
                 FROM codex_sessions WHERE owner_id = ? AND {deleted_filter}
-                ORDER BY started_at DESC LIMIT ?""",
-                (owner_id, limit),
-            ).fetchall()
-        return [dict(row) for row in rows]
+                ORDER BY started_at DESC, session_id DESC""",
+                (owner_id,),
+            )
+            for row in rows:
+                yield dict(row)
+
+    def codex_session_summary(self, owner_id: str) -> dict[str, int]:
+        with self.connect() as connection:
+            return dict(connection.execute(
+                """SELECT COUNT(*) AS sessions,
+                COALESCE(SUM(turn_count), 0) AS turns,
+                COALESCE(SUM(message_count), 0) AS messages,
+                COALESCE(SUM(tool_call_count), 0) AS tools,
+                COALESCE(SUM(total_tokens), 0) AS tokens
+                FROM codex_sessions WHERE owner_id = ? AND deleted_at IS NULL""",
+                (owner_id,),
+            ).fetchone())
 
     def purge_codex_sessions(self, retention_days: int) -> int:
         cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
@@ -1173,6 +1187,30 @@ class Database:
                 )""",
                 (cutoff,),
             )
+
+    def list_requests(
+        self, owner_id: str, *, page: int = 1, page_size: int = 10
+    ) -> dict[str, Any]:
+        with self.connect() as connection:
+            total = connection.execute(
+                """SELECT COUNT(*) FROM requests
+                JOIN client_keys ON client_keys.id = requests.key_id
+                JOIN providers ON providers.id = client_keys.provider_id
+                WHERE client_keys.owner_id = ?""",
+                (owner_id,),
+            ).fetchone()[0]
+            page = min(page, max(1, (total + page_size - 1) // page_size))
+            items = [dict(row) for row in connection.execute(
+                """SELECT requests.id, client_keys.name AS key_name, endpoint, model,
+                providers.name AS provider_name, status_code, total_tokens, latency_ms,
+                error, requests.created_at
+                FROM requests JOIN client_keys ON client_keys.id = requests.key_id
+                JOIN providers ON providers.id = client_keys.provider_id
+                WHERE client_keys.owner_id = ?
+                ORDER BY requests.id DESC LIMIT ? OFFSET ?""",
+                (owner_id, page_size, (page - 1) * page_size),
+            ).fetchall()]
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
 
     def overview(self, owner_id: str) -> dict[str, Any]:
         since_24h = (datetime.now(UTC) - timedelta(hours=24)).isoformat()

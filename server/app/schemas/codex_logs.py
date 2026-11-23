@@ -29,6 +29,23 @@ class CodexSessionView(BaseModel):
     deleted_at: datetime | None
 
 
+class CodexSessionSummary(BaseModel):
+    sessions: int
+    turns: int
+    messages: int
+    tools: int
+    tokens: int
+
+
+class CodexSessionPage(BaseModel):
+    items: list[CodexSessionView]
+    total: int
+    page: int
+    page_size: int
+    summary: CodexSessionSummary
+    projects: list[str]
+
+
 class CodexSessionRename(BaseModel):
     title: str | None = None
 

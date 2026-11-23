@@ -18,7 +18,7 @@ export const authSessionSchema = z.object({
 export const authConfigSchema = z.object({ registration_enabled: z.boolean() });
 
 export const loginFormSchema = z.object({
-  email: z.string().trim().email("请输入有效邮箱"),
+  email: z.string().trim().email("请输入有效邮箱").max(254, "邮箱最多 254 个字符"),
   password: z.string().min(1, "请输入密码").max(256),
 });
 
