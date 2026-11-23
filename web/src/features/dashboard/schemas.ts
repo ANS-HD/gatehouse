@@ -112,6 +112,7 @@ export const codexSessionDetailSchema = codexSessionSchema.extend({
     output: z.string().nullable(),
     status: z.string().nullable(),
     timestamp: z.string().nullable(),
+    ended_at: z.string().nullable().optional(),
   })),
   context: z.object({
     model: z.string().nullable(),
@@ -158,6 +159,7 @@ export const codexSessionDetailSchema = codexSessionSchema.extend({
     events: z.array(z.object({
       kind: z.string(),
       timestamp: z.string().nullable(),
+      ended_at: z.string().nullable().optional(),
       role: z.string().nullable().optional(),
       text: z.string().nullable().optional(),
       call_id: z.string().nullable().optional(),

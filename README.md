@@ -4,7 +4,7 @@
 
 内置两类协议：
 
-- OpenAI 兼容：OpenAI、DeepSeek、Moonshot/Kimi、硅基流动、Groq、xAI、OpenRouter，以及其他兼容服务。
+- OpenAI 兼容：OpenAI、DeepSeek、阿里云百炼/通义千问、Moonshot/Kimi、硅基流动、Groq、xAI、OpenRouter，以及其他兼容服务。
 - Anthropic 原生：支持 Messages API 和官方 Anthropic SDK。
 
 ## 本地启动
@@ -38,6 +38,11 @@ sudo systemctl reload caddy
 首次启动会根据 `ADMIN_EMAIL` 和 `ADMIN_PASSWORD` 创建或更新管理员账户。登录后，管理员先配置供应商及允许使用的模型，再到“用户与授权”中为普通用户分配模型、RPM 和共享 Token 总额度。普通用户可在登录页注册；如不希望开放注册，将 `REGISTRATION_ENABLED` 设置为 `false`。
 
 管理员可以直接新增用户，也可以在编辑用户时填写新密码完成重置。密码至少 8 个字符。
+
+添加供应商时，可快速选择阿里云百炼北京或新加坡地域，并从下拉列表选择常用通义千问模型。
+填写上游 Base URL 和 API Key 后，点击“获取模型列表”可加载上游返回的模型并搜索、多选；
+编辑供应商时可复用已保存的密钥。获取列表后需选择模型并保存才会更新授权；不支持模型列表接口的
+上游仍可手动输入模型 ID。阿里云 Key、地域与计费方案需匹配，空间专属地址也可手动填写。
 
 ## 调用网关
 
@@ -113,6 +118,9 @@ python3 deploy/upload_codex_logs.py \
 32 MiB，可通过 `CODEX_LOG_MAX_BYTES` 调整。会话分析区支持标题、项目、模型和消息正文搜索，并汇总消息、
 工具调用和 Token 用量。会话默认保留 90 天，可通过 `CODEX_LOG_RETENTION_DAYS` 调整；服务启动时及之后
 每 6 小时清理一次过期会话。
+
+会话详情显示每轮起止时间、耗时、事件相对时间和工具调用耗时。运行耗时按各轮起止间隔合计，
+会话跨度则包含轮间等待；未完成轮次按最后一条已记录事件计算。旧日志查看详情时会自动重新解析。
 
 ## 备份与恢复
 

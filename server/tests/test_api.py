@@ -306,6 +306,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(detail.json()["context"]["base_instructions"], "Base system instructions")
         self.assertEqual(turn["context"]["sandbox"], "workspace-write")
         self.assertEqual(turn["events"][-1]["output"], "Done!")
+        self.assertIsNotNone(turn["events"][-1]["ended_at"])
+        self.assertIsNotNone(detail.json()["tool_calls"][0]["ended_at"])
         search = self.client.get(
             "/api/codex/sessions?q=已经完成&project=%2Fprivate%2Fproject",
             headers=self.authorization(token),

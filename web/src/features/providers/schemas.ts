@@ -15,6 +15,14 @@ export const providerSchema = z.object({
 });
 
 export const providersSchema = z.array(providerSchema);
+export const discoveredModelsSchema = z.object({ models: z.array(z.string()) });
+
+export type ModelDiscoveryInput = {
+  provider_id?: string;
+  protocol: z.infer<typeof providerProtocolSchema>;
+  base_url: string;
+  api_key?: string;
+};
 
 export const providerFormSchema = z.object({
   name: z.string().trim().min(1, "请输入名称").max(64),

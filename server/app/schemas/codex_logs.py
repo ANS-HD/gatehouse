@@ -46,6 +46,7 @@ class CodexToolCallView(BaseModel):
     output: str | None
     status: str | None
     timestamp: datetime | None
+    ended_at: datetime | None = None
 
 
 class CodexContextView(BaseModel):
@@ -63,6 +64,7 @@ class CodexContextView(BaseModel):
 class CodexTurnEventView(BaseModel):
     kind: str
     timestamp: datetime | None
+    ended_at: datetime | None = None
     role: str | None = None
     text: str | None = None
     call_id: str | None = None

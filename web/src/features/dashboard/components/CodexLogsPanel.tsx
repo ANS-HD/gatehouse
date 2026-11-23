@@ -1,14 +1,16 @@
-import { DeleteOutlined, EditOutlined, EyeOutlined, FolderOpenOutlined, RestOutlined, UploadOutlined } from "@ant-design/icons";
+import { ClockCircleOutlined, DeleteOutlined, EditOutlined, EyeOutlined, FolderOpenOutlined, RestOutlined, UploadOutlined } from "@ant-design/icons";
 import { Button, Card, Descriptions, Empty, Flex, Input, Modal, Popconfirm, Progress, Select, Space, Statistic, Switch, Tabs, Tag, Typography } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { compactNumber, formatDate, integer } from "../../../lib/format";
 import type { CodexSession, CodexSessionDetail } from "../schemas";
+import { elapsedMs, formatElapsed, formatLogTime, formatTurnOffset, turnTiming } from "../codex-timing";
 
 const { Paragraph, Text } = Typography;
 
 type TimelineMessage = CodexSessionDetail["messages"][number];
 type TimelineTool = CodexSessionDetail["tool_calls"][number];
 type TurnEvent = CodexSessionDetail["turns"][number]["events"][number];
+type Turn = CodexSessionDetail["turns"][number];
 
 function readablePayload(value: string) {
   const formatField = (key: string, item: unknown) => {
@@ -106,8 +108,58 @@ function ToolCard({ tool }: { tool: TimelineTool | TurnEvent }) {
         <Space><Tag color="purple">工具调用</Tag><Text strong>{tool.name || "tool"}</Text></Space>
         <Text type="secondary">{tool.timestamp ? formatDate(tool.timestamp) : tool.status}</Text>
       </Flex>
+      {tool.ended_at ? <Text type="secondary">工具耗时 {formatElapsed(elapsedMs(tool.timestamp, tool.ended_at))} · 结束于 {formatLogTime(tool.ended_at)}</Text> : null}
       <ToolPayload label="调用参数" value={tool.input} />
       <ToolPayload label="返回结果" value={tool.output} />
+    </section>
+  );
+}
+
+function TurnTimingSummary({ turn }: { turn: Turn }) {
+  const timing = turnTiming(turn);
+  return (
+    <div className="codex-turn-timing">
+      <div><Text type="secondary">本轮耗时</Text><strong>{formatElapsed(timing.durationMs)}</strong><Text type="secondary">{timing.partial ? "截至末条记录" : "开始至完成"}</Text></div>
+      <div><Text type="secondary">开始时间</Text><Text>{formatLogTime(timing.startedAt)}</Text></div>
+      <div><Text type="secondary">{timing.partial ? "记录截至" : "结束时间"}</Text><Text>{formatLogTime(timing.endedAt)}</Text></div>
+    </div>
+  );
+}
+
+function TurnTimeline({ turn, events }: { turn: Turn; events: TurnEvent[] }) {
+  const timing = turnTiming(turn);
+  const chronological = events.map((event, index) => ({ event, index })).sort((a, b) => {
+    const first = Date.parse(a.event.timestamp || "");
+    const second = Date.parse(b.event.timestamp || "");
+    const firstValid = Number.isFinite(first);
+    const secondValid = Number.isFinite(second);
+    if (firstValid && secondValid) return first - second || a.index - b.index;
+    return firstValid === secondValid ? a.index - b.index : firstValid ? -1 : 1;
+  });
+  return (
+    <section className="codex-single-turn-timeline" aria-label="本轮时间线">
+      <Text strong>本轮时间线</Text>
+      <div className="codex-messages codex-turn-events codex-clockline">
+        <div className="codex-clock-event boundary">
+          <div className="codex-clock-time"><time dateTime={timing.startedAt || undefined}>{formatLogTime(timing.startedAt)}</time></div>
+          <div className="codex-clock-content"><Text strong>本轮开始</Text></div>
+        </div>
+        {chronological.map(({ event, index }) => (
+          <div className="codex-clock-event" key={`${event.kind}-${event.call_id || index}`}>
+            <div className="codex-clock-time">
+              <time dateTime={event.timestamp || undefined}>{formatLogTime(event.timestamp)}</time>
+              <Text type="secondary">{formatTurnOffset(timing.startedAt, event.timestamp)}</Text>
+            </div>
+            <div className="codex-clock-content">
+              {event.kind === "message" ? <MessageCard message={event} /> : <ToolCard tool={event} />}
+            </div>
+          </div>
+        ))}
+        <div className="codex-clock-event boundary">
+          <div className="codex-clock-time"><time dateTime={timing.endedAt || undefined}>{formatLogTime(timing.endedAt)}</time><Text type="secondary">{formatTurnOffset(timing.startedAt, timing.endedAt)}</Text></div>
+          <div className="codex-clock-content"><Text strong>{timing.partial ? "日志记录截至此处" : "本轮完成"}</Text></div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -158,6 +210,14 @@ export function CodexLogsPanel({
     tools: allSessions.reduce((sum, item) => sum + item.tool_call_count, 0),
     tokens: allSessions.reduce((sum, item) => sum + item.total_tokens, 0),
   }), [allSessions]);
+  const sessionTiming = useMemo(() => {
+    const durations = detail?.turns.map((turn) => turnTiming(turn).durationMs)
+      .filter((value): value is number => value !== null) ?? [];
+    return {
+      runtimeMs: durations.length ? durations.reduce((sum, value) => sum + value, 0) : null,
+      knownTurns: durations.length,
+    };
+  }, [detail]);
   useEffect(() => {
     setSelectedTurnId(detail?.turns.at(-1)?.turn_id);
   }, [detail?.session_id]);
@@ -278,6 +338,7 @@ export function CodexLogsPanel({
                   <Text type="secondary" ellipsis={{ tooltip: session.cwd || undefined }}>
                     {session.cwd || "未知目录"} · {formatDate(session.started_at)}
                   </Text>
+                  <Text type="secondary" title="首条至末条日志的时间跨度，包含轮间等待"><ClockCircleOutlined /> 会话跨度 {formatElapsed(elapsedMs(session.started_at, session.ended_at))}</Text>
                 </div>
                 <div className="codex-session-metrics">
                   <div><Text type="secondary">模型</Text><Tag>{session.model || session.source}</Tag></div>
@@ -347,6 +408,12 @@ export function CodexLogsPanel({
                 </Text>
               ) : null}
             </Flex>
+            <div className="codex-session-timing">
+              <Statistic title="运行耗时（各轮合计）" value={formatElapsed(sessionTiming.runtimeMs)} />
+              <Statistic title="会话跨度（含轮间等待）" value={formatElapsed(elapsedMs(detail.started_at, detail.ended_at))} />
+              <Text type="secondary">运行耗时按各轮起止时间合计。{sessionTiming.knownTurns < detail.turns.length ? `已记录 ${sessionTiming.knownTurns} / ${detail.turns.length} 轮耗时。` : "未完成轮次按末条日志时间统计。"}</Text>
+              <div className="codex-session-time-range"><Text type="secondary">开始 {formatLogTime(detail.started_at)}</Text><Text type="secondary">末条记录 {formatLogTime(detail.ended_at)}</Text></div>
+            </div>
             <Tabs
               items={[
                 {
@@ -366,7 +433,8 @@ export function CodexLogsPanel({
                             <span className="codex-turn-request-preview">
                               {turn.events.find((event) => event.kind === "message" && event.role === "user")?.text || "未记录用户请求"}
                             </span>
-                            <small>{turn.started_at ? formatDate(turn.started_at) : "未知时间"}</small>
+                            <small>{formatLogTime(turn.started_at)}</small>
+                            <small><ClockCircleOutlined /> {formatElapsed(turnTiming(turn).durationMs)}{turn.status !== "completed" ? " · 截至记录" : ""}</small>
                             <small>{compactNumber.format(turn.total_tokens)} Token · {turn.tool_call_count} 工具</small>
                           </button>
                         ))}
@@ -393,6 +461,7 @@ export function CodexLogsPanel({
                             <Text type="secondary">{selectedTurn.tool_call_count} 工具调用</Text>
                             {selectedTurn.context_window ? <Text type="secondary">上下文窗 {compactNumber.format(selectedTurn.context_window)}</Text> : null}
                           </Flex>
+                          <TurnTimingSummary turn={selectedTurn} />
                           <section className="codex-turn-requests">
                             <Flex justify="space-between" align="center" gap={8} wrap="wrap">
                               <Text strong>本轮用户请求</Text>
@@ -402,6 +471,7 @@ export function CodexLogsPanel({
                               <MessageCard message={request} key={`turn-request-${index}`} />
                             )) : <Text type="secondary" className="codex-turn-request-empty">这轮日志没有记录用户请求正文</Text>}
                           </section>
+                          <TurnTimeline turn={selectedTurn} events={selectedProcessEvents} />
                           {selectedTurn.context ? (
                             <div className="codex-turn-context">
                               <Flex justify="space-between" align="center" gap={8} wrap="wrap">
@@ -477,12 +547,6 @@ export function CodexLogsPanel({
                           ) : (
                             <Text type="secondary" className="codex-turn-context-empty">该轮日志没有记录 turn_context</Text>
                           )}
-                          <div className="codex-messages codex-turn-events">
-                            <Text strong className="codex-turn-timeline-title">响应与执行过程</Text>
-                            {selectedProcessEvents.map((event, index) => event.kind === "message" ? (
-                              <MessageCard message={event} key={`turn-message-${index}`} />
-                            ) : <ToolCard tool={event} key={`turn-tool-${event.call_id || index}`} />)}
-                          </div>
                         </div>
                       ) : null}
                     </div>

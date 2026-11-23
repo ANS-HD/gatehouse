@@ -52,6 +52,17 @@ class ProviderModelView(BaseModel):
     name: str
 
 
+class ProviderModelsDiscover(BaseModel):
+    provider_id: str | None = None
+    protocol: ProviderProtocol
+    base_url: HttpUrl
+    api_key: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+class ProviderModelsDiscovered(BaseModel):
+    models: list[str]
+
+
 class ProviderView(BaseModel):
     id: str
     name: str

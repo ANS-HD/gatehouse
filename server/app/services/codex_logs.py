@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-
-CODEX_DERIVED_VERSION = 6
+CODEX_DERIVED_VERSION = 7
 
 
 class InvalidCodexLog(ValueError):
@@ -294,6 +293,7 @@ def _tool_call(payload: dict[str, Any], timestamp: str | None) -> dict[str, Any]
         "output": None,
         "status": payload.get("status") if isinstance(payload.get("status"), str) else None,
         "timestamp": timestamp,
+        "ended_at": None,
     }
 
 
@@ -322,6 +322,7 @@ def turns_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "context_window": 0,
             "context": None,
             "events": [],
+            "_last_recorded_at": _timestamp(timestamp),
         }
         turns.append(turn)
         return turn
@@ -426,9 +427,17 @@ def turns_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 }
             continue
 
-        if record_type == "event_msg" and event_type == "task_complete":
+        last_recorded_at = current["_last_recorded_at"]
+        if timestamp_value is not None and (
+            last_recorded_at is None or timestamp_value > last_recorded_at
+        ):
+            current["_last_recorded_at"] = timestamp_value
+
+        if record_type == "event_msg" and event_type in {
+            "task_complete", "task_aborted", "turn_aborted"
+        }:
             current["ended_at"] = timestamp
-            current["status"] = "completed"
+            current["status"] = "completed" if event_type == "task_complete" else "interrupted"
             continue
 
         if message:
@@ -453,6 +462,7 @@ def turns_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 call_id = payload.get("call_id") or payload.get("id")
                 if isinstance(call_id, str) and call_id in calls:
                     calls[call_id]["output"] = _preview(payload.get("output"))
+                    calls[call_id]["ended_at"] = timestamp
                     if isinstance(payload.get("status"), str):
                         calls[call_id]["status"] = payload["status"]
                 continue
@@ -470,12 +480,16 @@ def turns_from_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 current["context_window"] = info["model_context_window"]
 
     for turn in turns:
+        last_recorded_at = turn.pop("_last_recorded_at")
         events = turn["events"]
         turn["message_count"] = sum(event["kind"] == "message" for event in events)
         turn["tool_call_count"] = sum(event["kind"] == "tool" for event in events)
         if turn["ended_at"] is None:
-            turn["ended_at"] = turn["started_at"]
-            turn["status"] = "interrupted"
+            turn["ended_at"] = (
+                last_recorded_at.isoformat() if last_recorded_at else turn["started_at"]
+            )
+            if turn["status"] != "completed":
+                turn["status"] = "interrupted"
     return turns
 
 
@@ -495,6 +509,8 @@ def tool_calls_from_transcript(transcript: str, limit: int = 500) -> list[dict[s
         if not isinstance(call_id, str):
             continue
         if payload_type in {"function_call", "custom_tool_call", "local_shell_call"}:
+            if len(calls) >= limit:
+                continue
             name = payload.get("name")
             if not isinstance(name, str):
                 name = "shell" if payload_type == "local_shell_call" else "tool"
@@ -510,11 +526,10 @@ def tool_calls_from_transcript(transcript: str, limit: int = 500) -> list[dict[s
                 "output": None,
                 "status": payload.get("status") if isinstance(payload.get("status"), str) else None,
                 "timestamp": timestamp.isoformat() if timestamp else None,
+                "ended_at": None,
             }
             calls.append(call)
             by_id[call_id] = call
-            if len(calls) >= limit:
-                break
         elif payload_type in {
             "function_call_output",
             "custom_tool_call_output",
@@ -523,6 +538,8 @@ def tool_calls_from_transcript(transcript: str, limit: int = 500) -> list[dict[s
             call = by_id.get(call_id)
             if call:
                 call["output"] = _preview(payload.get("output"))
+                timestamp = _timestamp(record.get("timestamp"))
+                call["ended_at"] = timestamp.isoformat() if timestamp else None
                 if isinstance(payload.get("status"), str):
                     call["status"] = payload["status"]
     return calls
