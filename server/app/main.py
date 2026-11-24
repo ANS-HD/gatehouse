@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import (
     admin,
     auth,
+    chat,
     codex_logs,
     gateway,
     health,
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     for router in (
         health.router,
         auth.router,
+        chat.router,
         admin.router,
         overview.router,
         providers.router,

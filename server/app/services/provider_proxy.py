@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode
 
 import httpx
+from anyio import CancelScope
 from fastapi import HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
@@ -373,28 +374,31 @@ async def proxy_request(
             response_details, response_truncated = response_log_fields(
                 upstream.headers, bytes(response_buffer), settings
             )
-            await upstream.aclose()
             try:
-                db.record_request(
-                    key_id=key["id"],
-                    endpoint=f"/v1/{path}",
-                    model=model,
-                    status_code=upstream.status_code,
-                    input_tokens=parser.usage.input_tokens,
-                    output_tokens=parser.usage.output_tokens,
-                    total_tokens=billable_tokens(
-                        parser.usage, upstream.status_code, reserved_tokens, error
-                    ),
-                    latency_ms=int((time.perf_counter() - started) * 1000),
-                    error=error,
-                    **request_details,
-                    **response_details,
-                    detail_truncated=(
-                        request_truncated or response_truncated or response_was_truncated
-                    ),
-                )
+                with CancelScope(shield=True):
+                    await upstream.aclose()
             finally:
-                db.release_token_reservation(key["owner_id"], reserved_tokens)
+                try:
+                    db.record_request(
+                        key_id=key["id"],
+                        endpoint=f"/v1/{path}",
+                        model=model,
+                        status_code=upstream.status_code,
+                        input_tokens=parser.usage.input_tokens,
+                        output_tokens=parser.usage.output_tokens,
+                        total_tokens=billable_tokens(
+                            parser.usage, upstream.status_code, reserved_tokens, error
+                        ),
+                        latency_ms=int((time.perf_counter() - started) * 1000),
+                        error=error,
+                        **request_details,
+                        **response_details,
+                        detail_truncated=(
+                            request_truncated or response_truncated or response_was_truncated
+                        ),
+                    )
+                finally:
+                    db.release_token_reservation(key["owner_id"], reserved_tokens)
 
     return StreamingResponse(
         stream(), status_code=upstream.status_code, headers=response_headers(upstream)

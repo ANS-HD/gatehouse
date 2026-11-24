@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiOutlined, CopyOutlined, DashboardOutlined, LogoutOutlined, PlusOutlined, ReloadOutlined, UserOutlined } from "@ant-design/icons";
+import { ApiOutlined, CommentOutlined, CopyOutlined, DashboardOutlined, LogoutOutlined, PlusOutlined, ReloadOutlined, UserOutlined } from "@ant-design/icons";
 import { App, Button, Card, Flex, Layout, Space, Spin, Typography } from "antd";
 import { ZodError } from "zod";
 import { Brand } from "../../components/Brand";
@@ -331,6 +331,7 @@ export function DashboardPage() {
           <Brand compact />
           <Space>
             <span className="user-chip"><UserOutlined /> {user?.email}</span>
+            <Button href="/chat" icon={<CommentOutlined />} aria-label="在线聊天">在线聊天</Button>
             <Button type="text" icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
             <Button type="text" icon={<LogoutOutlined />} onClick={logout}>退出</Button>
           </Space>

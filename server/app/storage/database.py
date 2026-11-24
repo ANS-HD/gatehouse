@@ -1040,6 +1040,14 @@ class Database:
             ).fetchone()
         return serialize_key(dict(row)) if row else None
 
+    def get_owned_proxy_key(self, key_id: str, owner_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT key_hash FROM client_keys WHERE id = ? AND owner_id = ?",
+                (key_id, owner_id),
+            ).fetchone()
+        return self.get_key_by_hash(row["key_hash"]) if row else None
+
     def get_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
         with self.connect() as connection:
             row = connection.execute(
