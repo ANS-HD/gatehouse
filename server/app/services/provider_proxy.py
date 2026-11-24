@@ -402,10 +402,16 @@ async def proxy_request(
 
 
 def parse_json(body: bytes, content_type: str) -> dict[str, Any] | None:
-    if not body or "application/json" not in content_type:
+    media_type = content_type.partition(";")[0].strip().lower()
+    is_json = media_type == "application/json" or (
+        media_type.startswith("application/") and media_type.endswith("+json")
+    )
+    if not body or not is_json:
         return None
     try:
         value = json.loads(body)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
-    return value if isinstance(value, dict) else None
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    return value

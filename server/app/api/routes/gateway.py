@@ -77,11 +77,25 @@ async def gateway(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Request body is too large"
         )
     try:
-        payload = parse_json(body, request.headers.get("content-type", ""))
-        model = requested_model(payload, body, request.headers.get("content-type", ""))
+        content_type = request.headers.get("content-type", "")
+        payload = parse_json(body, content_type)
+        model = requested_model(payload, body, content_type)
         if request.method == "POST" and clean_path != "models":
             if not model:
-                raise HTTPException(status_code=400, detail="A model is required")
+                if not body.strip():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Request body is empty; send a JSON object containing model",
+                    )
+                if payload is None and "multipart/form-data" not in content_type.lower():
+                    raise HTTPException(
+                        status_code=415,
+                        detail="JSON requests require Content-Type: application/json",
+                    )
+                raise HTTPException(
+                    status_code=400,
+                    detail="A non-empty string model field is required in the request body",
+                )
             if model != key["model_name"]:
                 raise HTTPException(
                     status_code=403, detail="This key cannot use the requested model"
@@ -95,7 +109,7 @@ async def gateway(
             method=request.method,
             body=body,
             payload=payload,
-            content_type=request.headers.get("content-type", ""),
+            content_type=content_type,
             default=settings.default_token_reservation,
         )
         if not db.reserve_tokens(key["owner_id"], reservation):
